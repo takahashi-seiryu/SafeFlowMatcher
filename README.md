@@ -1,27 +1,20 @@
 # CBF-CFM
 
 
+
 # Installation
 ```
 conda env create -f environment.yml
-conda activate safediffuser
+conda activate safe_cfm
 pip install -e .
 pip install qpth cvxpy cvxopt
+pip install torchdyn torchdiffeq
+pip install git+https://github.com/atong01/conditional-flow-matching.git
 ```
 
-# Switch between different experiments
-```
-git switch maze2d/locomotion/kuka
-```
+<!-- # Important notes for SafeDiffusers
 
-# Important notes for SafeDiffusers
-
-1. run the following code first before running any code to address potential bugs (mujoco200 is needed)
-```
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/nvidia-515
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/wei/.mujoco/mujoco200/bin
-```
-2. Choose diffusers/CG/Truncate/different safediffusers 
+1. Choose diffusers/CG/Truncate/different safediffusers 
 
 (I) maze2d case:
 
@@ -39,10 +32,10 @@ Choose any one option betwee lines 177 and 207 of the file diffuser/models/diffu
 
 (III) Manipulation (kuka) case:
 
-Choose any one option betwee lines 405 and 439 of the file denoising_diffusion_pytorch/denoising_diffusion_pytorch.py
+Choose any one option betwee lines 405 and 439 of the file denoising_diffusion_pytorch/denoising_diffusion_pytorch.py -->
 
 
-# Use pre-trained models
+<!-- # Use pre-trained models
 ## 1. Downloading weights
 Download pretrained diffusion models and value functions (from diffuser in the locomotion branch) with:
 ```
@@ -70,15 +63,21 @@ Manipulation (unconditional):
 python scripts/unconditional_kuka_planning_eval.py
 ```
 
-The --logbase points the experiment loader to the folder containing the pretrained/self-trained models.
+The --logbase points the experiment loader to the folder containing the pretrained/self-trained models. -->
 
 # Training from scratch
-## 1. Train a diffusion model with:
+## 1. Train generative models (CFM, Diffuser) with:
 
-Maze2d:
+Maze2d (Conditional Flow Matching):
 
 ```
-python scripts/train.py --config config.maze2d --dataset maze2d-large-v1
+python scripts/train.py --config config.maze2d --method cfm --dataset maze2d-large-v1
+```
+
+Maze2d (Diffuser):
+
+```
+python scripts/train.py --config config.maze2d --method base --dataset maze2d-large-v1
 ```
 
 Locomotion:
@@ -103,10 +102,16 @@ See locomotion:values for the corresponding default hyperparameters.
 
 ## 3. Plan using your newly-trained models with the same command as in the pretrained planning section, simply replacing the logbase to point to your new models:
 
-Maze2d:
+Maze2d (Conditional Flow Matching):
 
 ```
-python scripts/plan_maze2d.py --config config.maze2d --dataset maze2d-large-v1 --logbase logs
+python scripts/plan_maze2d.py --config config.maze2d --method cfm --dataset maze2d-large-v1 --logbase logs
+```
+
+Maze2d (Diffuser):
+
+```
+python scripts/plan_maze2d.py --config config.maze2d --method base --dataset maze2d-large-v1 --logbase logs
 ```
 
 Locomotion:
@@ -126,4 +131,5 @@ TBD
 
 # Acknowledgements
 The diffusion model implementation and organization are based on Michael Janner's diffuser repo: https://github.com/jannerm/diffuser
+
 The Safe diffuser implementation and organization are bsed on Xiao's SafeDiffuser repo: https://github.com/Weixy21/SafeDiffuser
