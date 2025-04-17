@@ -15,6 +15,7 @@ class Parser(utils.Parser):
     dataset: str = 'maze2d-umaze-v1'
     config: str = 'config.maze2d'
     method: str = 'cfm'
+    n_timesteps: int = 1000
 
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -31,6 +32,8 @@ env = datasets.load_environment(args.dataset)
 
 diffusion_experiment = utils.load_diffusion(args.logbase, args.dataset, args.diffusion_loadpath, epoch=args.diffusion_epoch)
 
+# Command line argument로 받은 n_timesteps 사용
+diffusion.n_timesteps = args.n_timesteps
 diffusion = diffusion_experiment.ema
 dataset = diffusion_experiment.dataset
 renderer = diffusion_experiment.renderer

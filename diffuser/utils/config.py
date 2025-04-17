@@ -19,7 +19,7 @@ def import_class(_class):
     
     return _class
 
-class Config(collections.Mapping):
+class Config(collections.abc.Mapping):
 
     def __init__(self, _class, verbose=True, savepath=None, device=None, **kwargs):
         self._class = import_class(_class)
