@@ -4,6 +4,11 @@ import numpy as np
 import torch
 import einops
 import pdb
+import json
+from datetime import datetime
+from copy import deepcopy
+from torch import nn
+from torch.utils.data import DataLoader
 
 from .arrays import batch_to_device, to_np, to_device, apply_dict
 from .timer import Timer
@@ -98,6 +103,14 @@ class Trainer(object):
 
         self.reset_parameters()
         self.step = 0
+        
+        # 시간 측정 결과를 저장할 딕셔너리
+        self.timing_stats = {
+            'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'steps': [],
+            'sampling': [],
+            'total_time': None
+        }
 
     def reset_parameters(self):
         self.ema_model.load_state_dict(self.model.state_dict())
@@ -113,13 +126,14 @@ class Trainer(object):
     #-----------------------------------------------------------------------------#
 
     def train(self, n_train_steps):
-
         timer = Timer()
+
         for step in range(n_train_steps):
+            batch_timer = Timer()
+
             for i in range(self.gradient_accumulate_every):
                 batch = next(self.dataloader)
                 batch = batch_to_device(batch)
-
                 loss, infos = self.model.loss(*batch)
                 loss = loss / self.gradient_accumulate_every
                 loss.backward()
@@ -131,22 +145,58 @@ class Trainer(object):
                 self.step_ema()
 
             if self.step % self.save_freq == 0:
-                label = self.step // self.label_freq * self.label_freq
-                self.save(label)
+                self.save()
+                # save_freq마다 타이밍 정보도 저장
+                self.timing_stats['current_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                self.timing_stats['elapsed_time'] = timer()
+                timing_stats_path = os.path.join(self.logdir, 'training_timing_stats.json')
+                with open(timing_stats_path, 'w') as f:
+                    json.dump(self.timing_stats, f, indent=4)
 
             if self.step % self.log_freq == 0:
                 infos_str = ' | '.join([f'{key}: {val:8.4f}' for key, val in infos.items()])
-                print(f'{self.step}: {loss:8.4f} | {infos_str} | t: {timer():8.4f}')
+                step_time = batch_timer()
+                print(f'{self.step}: {loss:8.4f} | {infos_str} | t: {step_time:8.4f}')
+                
+                # 스텝 시간 저장
+                self.timing_stats['steps'].append({
+                    'step': self.step,
+                    'time': step_time,
+                    'loss': float(loss)
+                })
 
             if self.step == 0 and self.sample_freq:
                 self.render_reference(self.n_reference)
 
             if self.sample_freq and self.step % self.sample_freq == 0:
+                sampling_timer = Timer()
                 self.render_samples(n_samples=self.n_samples)
+                sampling_time = sampling_timer()
+                print(f'Sampling completed in {sampling_time:.2f} seconds')
+                
+                # sampling 시간 저장
+                self.timing_stats['sampling'].append({
+                    'step': self.step,
+                    'time': sampling_time
+                })
 
             self.step += 1
 
-    def save(self, epoch):
+        # 전체 training 시간 저장
+        total_time = timer()
+        self.timing_stats['total_time'] = {
+            'seconds': total_time,
+            'formatted': f'{total_time/3600:.2f} hours ({total_time:.2f} seconds)'
+        }
+        self.timing_stats['end_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 최종 타이밍 정보를 JSON 파일로 저장
+        timing_stats_path = os.path.join(self.logdir, 'training_timing_stats.json')
+        with open(timing_stats_path, 'w') as f:
+            json.dump(self.timing_stats, f, indent=4)
+        print(f'\nTraining statistics saved to: {timing_stats_path}')
+
+    def save(self):
         '''
             saves model and ema to disk;
             syncs to storage bucket if a bucket is specified
@@ -156,7 +206,7 @@ class Trainer(object):
             'model': self.model.state_dict(),
             'ema': self.ema_model.state_dict()
         }
-        savepath = os.path.join(self.logdir, f'state_{epoch}.pt')
+        savepath = os.path.join(self.logdir, f'state_{self.step}.pt')
         torch.save(data, savepath)
         print(f'[ utils/training ] Saved model to {savepath}')
         if self.bucket is not None:
@@ -229,7 +279,7 @@ class Trainer(object):
             )
 
             ## [ n_samples x horizon x (action_dim + observation_dim) ]
-            samples = self.ema_model.conditional_sample(conditions, return_diffusion = False)
+            samples, trajectory = self.ema_model.conditional_sample(conditions)  # 튜플 반환값 처리
             samples = to_np(samples)
 
             ## [ n_samples x horizon x observation_dim ]
@@ -237,10 +287,6 @@ class Trainer(object):
 
             # [ 1 x 1 x observation_dim ]
             normed_conditions = to_np(batch.conditions[0])[:,None]
-
-            # from diffusion.datasets.preprocessing import blocks_cumsum_quat
-            # observations = conditions + blocks_cumsum_quat(deltas)
-            # observations = conditions + deltas.cumsum(axis=1)
 
             ## [ n_samples x (horizon + 1) x observation_dim ]
             normed_observations = np.concatenate([
@@ -251,11 +297,5 @@ class Trainer(object):
             ## [ n_samples x (horizon + 1) x observation_dim ]
             observations = self.dataset.normalizer.unnormalize(normed_observations, 'observations')
 
-            #### @TODO: remove block-stacking specific stuff
-            # from diffusion.datasets.preprocessing import blocks_euler_to_quat, blocks_add_kuka
-            # observations = blocks_add_kuka(observations)
-            ####
-
             savepath = os.path.join(self.logdir, f'sample-{self.step}-{i}.png')
             self.renderer.composite(savepath, observations)
-            

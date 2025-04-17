@@ -1,6 +1,7 @@
 import diffuser.utils as utils
 import torch.nn as nn
 import pdb
+import time
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
@@ -89,7 +90,6 @@ trainer_config = utils.Config(
     bucket=args.bucket,
     n_reference=args.n_reference,
     n_samples=args.n_samples,
-    num_workers=4,
 )
 
 #-----------------------------------------------------------------------------#
@@ -123,7 +123,19 @@ print('✓')
 
 n_epochs = int(args.n_train_steps // args.n_steps_per_epoch)
 
+from diffuser.utils import Timer
+
+timer = Timer()
+total_start = time.time()
+
 for i in range(n_epochs):
     print(f'Epoch {i} / {n_epochs} | {args.savepath}')
+    
+    epoch_timer = Timer()
     trainer.train(n_train_steps=args.n_steps_per_epoch)
+    epoch_time = epoch_timer()
+    
+    print(f'Epoch {i} completed in {epoch_time:.2f} seconds')
 
+total_time = time.time() - total_start
+print(f'\nTotal training time: {total_time/3600:.2f} hours ({total_time:.2f} seconds)')

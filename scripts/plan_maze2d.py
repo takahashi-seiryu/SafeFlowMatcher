@@ -32,9 +32,25 @@ env = datasets.load_environment(args.dataset)
 
 diffusion_experiment = utils.load_diffusion(args.logbase, args.dataset, args.diffusion_loadpath, epoch=args.diffusion_epoch)
 
-# Command line argument로 받은 n_timesteps 사용
-diffusion.n_timesteps = args.n_timesteps
 diffusion = diffusion_experiment.ema
+
+# n_timesteps 변경 및 관련 buffer 업데이트
+diffusion.n_timesteps = args.n_timesteps
+betas = diffusion.cosine_beta_schedule(args.n_timesteps)
+alphas = 1. - betas
+alphas_cumprod = torch.cumprod(alphas, axis=0)
+alphas_cumprod_prev = torch.cat([torch.ones(1), alphas_cumprod[:-1]])
+
+# buffer 업데이트
+diffusion.register_buffer('betas', betas)
+diffusion.register_buffer('alphas_cumprod', alphas_cumprod)
+diffusion.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
+diffusion.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+diffusion.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
+diffusion.register_buffer('log_one_minus_alphas_cumprod', torch.log(1. - alphas_cumprod))
+diffusion.register_buffer('sqrt_recip_alphas_cumprod', torch.sqrt(1. / alphas_cumprod))
+diffusion.register_buffer('sqrt_recipm1_alphas_cumprod', torch.sqrt(1. / alphas_cumprod - 1))
+
 dataset = diffusion_experiment.dataset
 renderer = diffusion_experiment.renderer
 
