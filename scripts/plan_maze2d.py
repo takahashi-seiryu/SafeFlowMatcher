@@ -35,7 +35,7 @@ diffusion = diffusion_experiment.ema
 dataset = diffusion_experiment.dataset
 renderer = diffusion_experiment.renderer
 
-policy = Policy(diffusion, dataset.normalizer)
+policy = Policy(diffusion, dataset.normalizer, args)
 
 def makedirs(dirname):
     if not os.path.exists(dirname):
