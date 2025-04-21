@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import torch
 from torch import nn
 import torchdiffeq
@@ -223,7 +224,7 @@ class CFM(nn.Module):
         loss, info = self.loss_fn(vt, ut)
         
         return loss, info
-    
+  
     def violation_forecasting(self, cond, *args, **kwargs): #CBF wise로 받게
         #1. init) x0 = [c, c,c,c,c,....,c]
         batch_size = len(cond[0])
@@ -245,7 +246,7 @@ class CFM(nn.Module):
         t_batch = torch.zeros((batch_size,), device=self.device) # same with torch.full((x.shape[0],), t=0, device=x.device)
         v0 = self.model(x0, None, t_batch) 
         
-        # 4. 닫힌 형식으로 r0(CBF 경계까지의 거리) 계산=====이거뭐야 무서워...
+        # 4. 닫힌 형식으로 r0(CBF 경계까지의 거리) 계산
         # 위치 및 속도 성분 추출
         pos_y = x0[:, :, self.action_dim]      # 위치 y 성분 (batch_size, horizon)
         pos_x = x0[:, :, self.action_dim + 1]  # 위치 x 성분 (batch_size, horizon)
@@ -256,28 +257,10 @@ class CFM(nn.Module):
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
         off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
         off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        # 2차 방정식 계수: A*r^2 + B*r + C = 0
-        A = (v_y/yr)**2 + (v_x/xr)**2
-        B = 2*(pos_y - off_y)*v_y/yr**2 + 2*(pos_x - off_x)*v_x/xr**2
-        C = ((pos_y - off_y)/yr)**2 + ((pos_x - off_x)/xr)**2 - (1 + 0.01)
-        # 판별식 계산
-        discriminant = B**2 - 4*A*C
-        # r0를 기본값 1로 초기화
-        r0 = torch.ones_like(pos_y)
-        # 유효한 교차점이 있는 경우 (판별식 >= 0)
-        valid_mask = discriminant >= 0
-        if valid_mask.any():
-            # 두 가능한 거리 계산
-            r1 = (-B[valid_mask] + torch.sqrt(discriminant[valid_mask])) / (2*A[valid_mask])
-            r2 = (-B[valid_mask] - torch.sqrt(discriminant[valid_mask])) / (2*A[valid_mask])
-            # 가장 작은 양수 거리 찾기
-            r_stack = torch.stack([r1, r2], dim=1)
-            r_stack[r_stack <= 0] = float('inf')  # 음수 값을 무한대로 설정
-            r_min, _ = torch.min(r_stack, dim=1)
-            # 양수 해가 없으면 기본값 r0=1 유지
-            r_min[r_min == float('inf')] = 1.0
-            # 유효한 점들의 r0 업데이트
-            r0[valid_mask] = r_min
+        
+        denominator = ((v_y/yr)**2 + (v_x/xr)**2)**(1/2)
+        r0 = (1 + 1e-2)**(1/2) / denominator
+        #r0 = torch.clamp(r0, min=0.1, max=10.0)
 
         #5. x'0와 x1 (one-shot) 구하기
         x0_prime = x0.clone()
@@ -335,7 +318,7 @@ class CFM(nn.Module):
 
         t_idx = (((t_idx+2)//4)*4) # conv 구조가 stride떄문에 4의 배수 horizon만 받음... 따라서 t에 오차가 생기는데 추후 수정필
         return t_idx, sub_goals
-    
+
     def violation_forecasting2(self, cond, *args, **kwargs): #CBF wise로 받게
         #1. init) x0 = [c, c,c,c,c,....,c]
         batch_size = len(cond[0])
@@ -369,41 +352,11 @@ class CFM(nn.Module):
         # CBF 매개변수 (4차 슈퍼타원)
         yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
-        
-        # r0 초기값 설정 (1.0으로 시작)
-        r0 = torch.ones_like(pos_y)
-        
-        # 뉴턴-랩슨 방법을 벡터화하여 구현
-        max_iters = 5  # 반복 횟수 (일반적으로 3-5회면 충분히 수렴)
-        r = r0.clone()
-        
-        for _ in range(max_iters):
-            # 현재 r 값에서의 위치 계산
-            y_r = pos_y + r * v_y
-            x_r = pos_x + r * v_x
-            
-            # CBF 함수값 계산: ((y-off_y)/yr)^4 + ((x-off_x)/xr)^4 - 1 - 0.01
-            cbf_val = ((y_r - off_y)/yr)**4 + ((x_r - off_x)/xr)**4 - 1 - 0.01
-            
-            # CBF 함수의 r에 대한 미분값 계산
-            # d/dr[((y-off_y)/yr)^4 + ((x-off_x)/xr)^4]
-            # = 4*((y-off_y)/yr)^3 * v_y/yr + 4*((x-off_x)/xr)^3 * v_x/xr
-            cbf_deriv = 4*((y_r - off_y)/yr)**3 * v_y/yr + 4*((x_r - off_x)/xr)**3 * v_x/xr
-            
-            # 미분값이 너무 작은 경우 발산 방지
-            valid_deriv = (cbf_deriv.abs() > 1e-8)
-            
-            # 뉴턴-랩슨 업데이트: r = r - f(r)/f'(r)
-            update = torch.zeros_like(r)
-            update[valid_deriv] = cbf_val[valid_deriv] / cbf_deriv[valid_deriv]
-            r = r - update
-            
-            # r 값이 음수가 되지 않도록 보정
-            r = torch.clamp(r, min=0.1)
-        
-            # 최종 r0 값 설정
-            r0 = r
-        
+    
+        denominator = ((v_y/yr)**4 + (v_x/xr)**4)**(1/4)
+        r0 = (1 + 1e-2)**(1/4) / denominator
+        #r0 = torch.clamp(r0, min=0.1, max=10.0)
+
         #5. x'0와 x1 (one-shot) 구하기
         x0_prime = x0.clone()
         x0_prime[:, :, self.action_dim:self.action_dim+2] = x0[:, :, self.action_dim:self.action_dim+2] + r0.unsqueeze(-1) * v0[:, :, self.action_dim:self.action_dim+2]
@@ -454,56 +407,58 @@ class CFM(nn.Module):
         t_idx = (((t_idx+2)//4)*4) # conv 구조가 stride떄문에 4의 배수 horizon만 받음... 따라서 t에 오차가 생기는데 추후 수정필
         return t_idx, sub_goals
 
-    
-
     def forward(self, cond, *args, **kwargs):
-        # 1. CBF violation 예측) 일단 함수안에 CBF넣어둠
-        # 2. sub goal로 job 나누기
-        # 3. 이어붙이기
         t, sub_goal = self.violation_forecasting(cond,  *args, **kwargs)
         t2, sub_goal2 = self.violation_forecasting2(cond,  *args, **kwargs)
-        print(t2, t)
-        cond1 = cond.copy()
-        cond1[t2-1] = sub_goal2
-        cond1.pop(self.horizon-1,None)
 
-        cond2 = cond.copy()
-        cond2[0] = sub_goal2
-        cond2[(t-1)-t2] = sub_goal
-        cond2.pop(self.horizon-1,None)
+        sub_goal_list = []
+        sub_goal_list.append([0, cond[0]])
+        sub_goal_list.append([self.horizon, cond[self.horizon-1]])
+        if t != 0:
+            sub_goal_list.append([t, sub_goal])
+        if t2 != 0:
+            sub_goal_list.append([t2, sub_goal2])
+        sub_goal_list = sorted(sub_goal_list, key=lambda x: x[0])
 
-        cond3 = cond.copy()
-        cond3[0] = sub_goal
-        cond3[(self.horizon-1)-t] = cond3[self.horizon-1].clone()
-        cond3.pop(self.horizon-1,None)
+        cond_list = []
+        step_list = []
+        for i in range(len(sub_goal_list)-1):
+            step_temp = sub_goal_list[i+1][0] - sub_goal_list[i][0]
+            cond_temp = {}
 
-        print("cond1: ", cond1)
-        print("step: ", t2)
-        print("cond2: ", cond2)
-        print("step: ", t-t2)
-        print("cond3: ", cond3)
-        print("step: ", self.horizon-t)
+            #make speed 0
+            zero_speed1 = sub_goal_list[i][1].clone()
+            zero_speed1[:, self.action_dim:] = 0.0
+            cond_temp[0] = zero_speed1
+            #cond_temp[0] = sub_goal_list[i][1]
 
-        print("traj1 go")
-        x1_1, traj_1 = self.conditional_sample(cond=cond1, *args, horizon=t2, **kwargs)
-        print("traj2 go")
-        x1_2, traj_2 = self.conditional_sample(cond=cond2, *args, horizon=t-t2, **kwargs)
-        print("traj3 go")
-        x1_3, traj_3 = self.conditional_sample(cond=cond3, *args, horizon=self.horizon-t, **kwargs)
+            #make speed 0
+            zero_speed2 = sub_goal_list[i+1][1].clone()
+            zero_speed2[:, self.action_dim:] = 0.0
+            cond_temp[step_temp -1] = zero_speed2
+            #cond_temp[step_temp -1] = sub_goal_list[i+1][1]
+            cond_list.append(cond_temp)
+            step_list.append(step_temp)
+
+        x1_list = []
+        traj_list = []
+        for i in range(len(cond_list)):
+            print(f"task {i}/ step: {step_list[i]}, cond: {cond_list[i]}")
+            x1_temp, traj_temp = self.conditional_sample(cond=cond_list[i], *args, horizon=step_list[i], **kwargs)
+            x1_list.append(x1_temp)
+            traj_list.append(traj_temp)
 
         # 궤적 시각화 함수 호출
-        visualize_trajectory(x1_1, x1_2, x1_3, self.action_dim,
-                            title="CBF 기반 경로 계획 궤적",
+        visualize_trajectory(x1_list, self.action_dim,
+                            title="CBF-based trajectory planning",
                             save_path="trajectory_segments.png")
 
-        # concat x1 & traj
-        #x1 = torch.cat([x1_1[:, :-1], x1_2], dim=1)        
-        x1 = torch.cat([x1_1, x1_2, x1_3], dim=1)
-        #traj = torch.cat([traj_1[:, :-1], traj_2], dim=1)
-        traj = torch.cat([traj_1, traj_2, traj_3], dim=2)
+        # concat x1 & traj   
+        x1 = torch.cat(x1_list, dim=1)
+        traj = torch.cat(traj_list, dim=2)
+        print(x1.shape)
         
         return x1, traj
-        #return x1_1, traj_1
 
     def forward_orig(self, cond, *args, **kwargs):
         return self.conditional_sample(cond=cond, *args, **kwargs)
@@ -528,10 +483,15 @@ def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, act
     # 벡터 정보 추출 (v_y, v_x) - detach() 추가
     v0_pos = v0[:, action_dim:action_dim+2].detach().cpu().numpy()
     
-    # 1. 궤적 시각화 (x0, x0_prime)
-    plt.figure(figsize=(12, 10))
-    plt.subplot(3, 1, 1)
-    # 궤적 그리기
+        # 기존 figure 설정 대신 사용
+    plt.figure(figsize=(15, 8))  # 전체 figure 크기 조정
+
+    # GridSpec으로 레이아웃 설정
+    gs = gridspec.GridSpec(2, 2, width_ratios=[1.5, 1], height_ratios=[1, 1])
+
+    # 1. 궤적 시각화 (왼쪽 전체 영역 사용)
+    ax1 = plt.subplot(gs[:, 0])  # 왼쪽 열 전체 사용
+    # 기존 궤적 그리기 코드...
     plt.plot(pos_x0[:, 1], pos_x0[:, 0], 'b-', label='x0 trajectory')
     plt.plot(pos_x0_prime[:, 1], pos_x0_prime[:, 0], 'g-', label='x0_prime trajectory')
     plt.plot(pos_x1[:, 1], pos_x1[:, 0], 'r-', label='x1 trajectory')
@@ -541,62 +501,49 @@ def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, act
     plt.scatter(pos_x1[t_idx, 1], pos_x1[t_idx, 0], color='black', s=100, label=f'x0 at t={t_idx}')
     # 두 점 연결
     plt.plot([pos_x0[t_idx, 1], pos_x0_prime[t_idx, 1]], 
-             [pos_x0[t_idx, 0], pos_x0_prime[t_idx, 0]], 
-             'r--', label='Connection at t_idx')
+            [pos_x0[t_idx, 0], pos_x0_prime[t_idx, 0]], 
+            'r--', label='Connection at t_idx')
     plt.title('Trajectories of x0 and x0_prime')
     plt.xlabel('pos_x')
     plt.ylabel('pos_y')
     plt.legend()
     plt.grid(True)
-    # x축과 y축 범위를 [-1, 1]로 설정
     plt.xlim(-1, 1)
     plt.ylim(-1, 1)
-    # 축 비율을 동일하게 설정 (정사각형 플롯 보장)
-    plt.gca().set_aspect('equal')
-    # Y축 반전 추가
+    plt.gca().set_aspect('equal')  # 정사각형 비율 유지
     plt.gca().invert_yaxis()
-    
-    # 2. CBF_value 그래프 - detach() 추가
-    plt.subplot(3, 1, 2)
+
+    # 2. CBF_value 그래프 (오른쪽 상단)
+    ax2 = plt.subplot(gs[0, 1])
     time_steps = np.arange(len(cbf_vi[0]))
     plt.plot(time_steps, cbf_vi[0].detach().cpu().numpy(), 'b-', label='CBF_valye')
-    #pdb.set_trace()
-    # t_idx 강조
     plt.scatter(t_idx, cbf_vi[0][t_idx].detach().cpu().numpy(), color='red', s=100)
-    
-    # cosine_sim = 0 선 추가
     plt.axhline(y=0, color='r', linestyle='--', label='cosine_sim = 0')
-    
+    plt.yscale('symlog', linthresh=1.1)
     plt.title('CBF value of x1')
     plt.xlabel('Time Step')
-    plt.ylabel('Cosine Similarity')
+    plt.ylabel('CBF value')
     plt.legend()
     plt.grid(True)
+    plt.ylim(-1.1, 1000)
 
-    # 3. cosine_sim 그래프 - detach() 추가
-    plt.subplot(3, 1, 3)
+    # 3. cosine_sim 그래프 (오른쪽 하단)
+    ax3 = plt.subplot(gs[1, 1])
     time_steps = np.arange(len(cosine_sim[0]))
     plt.plot(time_steps, cosine_sim[0].detach().cpu().numpy(), 'b-', label='cosine_sim')
-
-    # t_idx 강조
     plt.scatter(t_idx, cosine_sim[0][t_idx].detach().cpu().numpy(), color='red', s=100)
-    
-    # cosine_sim = 0 선 추가
     plt.axhline(y=0, color='r', linestyle='--', label='cosine_sim = 0')
-    
     plt.title('Cosine Similarity between v0 and v0_prime')
     plt.xlabel('Time Step')
     plt.ylabel('Cosine Similarity')
     plt.grid(True)
-    
+    plt.legend()
+
     plt.tight_layout()
     plt.savefig(name + 'trajectory_and_CBF_and_cosine.png')
     plt.close()
-    
-    print(f"시각화 완료: {name + 'trajectory_and_CBF_and_cosine.png'}")
-    return 'trajectory_and_CBF_and_cosine.png'
 
-def visualize_trajectory(x1_1, x1_2, x1_3, action_dim, title="trajectory Visualization", save_path="trajectory_visualization.png"):
+def visualize_trajectory(x1_list, action_dim, title="trajectory Visualization", save_path="trajectory_visualization.png"):
     """
     위치 좌표를 사용해 궤적을 시각화하는 함수
     
@@ -606,38 +553,44 @@ def visualize_trajectory(x1_1, x1_2, x1_3, action_dim, title="trajectory Visuali
     - title: 플롯 제목
     - save_path: 시각화 저장 경로
     """
-    import matplotlib.pyplot as plt
-    
-    # 각 세그먼트의 위치 데이터 추출 (batch_size=1 가정)
-    # y와 x 위치 추출 (시각화를 위해 detach하고 numpy로 변환)
-    pos_y_1 = x1_1[0, :, action_dim].detach().cpu().numpy()
-    pos_x_1 = x1_1[0, :, action_dim+1].detach().cpu().numpy()
-    
-    pos_y_2 = x1_2[0, :, action_dim].detach().cpu().numpy()
-    pos_x_2 = x1_2[0, :, action_dim+1].detach().cpu().numpy()
-    
-    pos_y_3 = x1_3[0, :, action_dim].detach().cpu().numpy()
-    pos_x_3 = x1_3[0, :, action_dim+1].detach().cpu().numpy()
-    
     # 플롯 생성
     plt.figure(figsize=(10, 8))
-    
-    # 각 세그먼트를 다른 색상으로 플롯
-    plt.plot(pos_x_1, pos_y_1, 'b-', linewidth=2, label='1st segment')
-    plt.plot(pos_x_2, pos_y_2, 'g-', linewidth=2, label='2st segment')
-    plt.plot(pos_x_3, pos_y_3, 'r-', linewidth=2, label='3st segment')
+
+    num_x1 = len(x1_list)
+    if num_x1 >0:
+        x1_1 = x1_list[0]
+        pos_y_1 = x1_1[0, :, action_dim].detach().cpu().numpy()
+        pos_x_1 = x1_1[0, :, action_dim+1].detach().cpu().numpy()
+        plt.plot(pos_x_1, pos_y_1, 'b-', linewidth=2, label='1st segment')
+    if num_x1 >1:
+        x1_2 = x1_list[1]
+        pos_y_2 = x1_2[0, :, action_dim].detach().cpu().numpy()
+        pos_x_2 = x1_2[0, :, action_dim+1].detach().cpu().numpy()
+        plt.plot(pos_x_2, pos_y_2, 'g-', linewidth=2, label='2st segment')
+    if num_x1 >2:
+        x1_3 = x1_list[2]
+        pos_y_3 = x1_3[0, :, action_dim].detach().cpu().numpy()
+        pos_x_3 = x1_3[0, :, action_dim+1].detach().cpu().numpy()
+        plt.plot(pos_x_3, pos_y_3, 'r-', linewidth=2, label='3st segment')
     
     # 시작점과 끝점 표시
     plt.scatter(pos_x_1[0], pos_y_1[0], color='blue', s=100, marker='o', label='start point')
-    plt.scatter(pos_x_3[-1], pos_y_3[-1], color='red', s=100, marker='o', label='end point')
+    if num_x1 == 3:
+        plt.scatter(pos_x_3[-1], pos_y_3[-1], color='red', s=100, marker='o', label='end point')
+    elif num_x1 == 2:
+        plt.scatter(pos_x_2[-1], pos_y_2[-1], color='red', s=100, marker='o', label='end point')
+    elif num_x1 == 1:
+        plt.scatter(pos_x_1[-1], pos_y_1[-1], color='red', s=100, marker='o', label='end point')
     
     # 전환점 표시
-    plt.scatter(pos_x_1[-1], pos_y_1[-1], color='purple', s=150, marker='*', label='seg_1')
-    plt.scatter(pos_x_2[-1], pos_y_2[-1], color='purple', s=150, marker='*', label='seg_2')
+    if num_x1 > 1:
+        plt.scatter(pos_x_1[-1], pos_y_1[-1], color='purple', s=150, marker='*', label='seg_1')
+    if num_x1 > 2:
+        plt.scatter(pos_x_2[-1], pos_y_2[-1], color='purple', s=150, marker='*', label='seg_2')
     
     # 레이블과 제목 추가
-    plt.xlabel('위치 X')
-    plt.ylabel('위치 Y')
+    plt.xlabel('Position X')
+    plt.ylabel('Position Y')
     plt.title(title)
     plt.legend()
     plt.grid(True)
