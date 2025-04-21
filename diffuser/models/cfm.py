@@ -179,15 +179,6 @@ class CFM(nn.Module):
         # device = self.betas.device
         batch_size = len(cond[0])
         horizon = horizon or self.horizon
-        #horizon = 124
-        #cond[767] = cond[383].clone()
-        #cond.pop(383, None)
-      
-        #cond[horizon-1] = cond[383].clone()
-        #cond.pop(383, None)
-
-        #cond[179] = torch.tensor([[-0.3, 0, -0.0026,  0.0122]], device='cuda:0')
-        #cond[383] = torch.tensor([[-0.8380, 0.7506, -0.0026,  0.0122]], device='cuda:0')
         shape = (batch_size, horizon, self.transition_dim)
 
         return self.p_sample_loop(shape, cond, return_diffusion=return_diffusion, *args, **kwargs)
@@ -439,16 +430,8 @@ class CFM(nn.Module):
             step_temp = sub_goal_list[i+1][0] - sub_goal_list[i][0]
             cond_temp = {}
 
-            #make speed 0
-            #zero_speed1 = sub_goal_list[i][1].clone()
-            #zero_speed1[:, self.action_dim:] = 0.0
-            #cond_temp[0] = zero_speed1
             cond_temp[0] = sub_goal_list[i][1]
 
-            #make speed 0
-            #zero_speed2 = sub_goal_list[i+1][1].clone()
-            #zero_speed2[:, self.action_dim:] = 0.0
-            #cond_temp[step_temp -1] = zero_speed2
             cond_temp[step_temp -1] = sub_goal_list[i+1][1]
             cond_list.append(cond_temp)
             step_list.append(step_temp)
