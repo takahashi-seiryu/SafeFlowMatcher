@@ -531,27 +531,30 @@ def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, act
     # 1. 궤적 시각화 (x0, x0_prime)
     plt.figure(figsize=(12, 10))
     plt.subplot(3, 1, 1)
-    
     # 궤적 그리기
     plt.plot(pos_x0[:, 1], pos_x0[:, 0], 'b-', label='x0 trajectory')
     plt.plot(pos_x0_prime[:, 1], pos_x0_prime[:, 0], 'g-', label='x0_prime trajectory')
     plt.plot(pos_x1[:, 1], pos_x1[:, 0], 'r-', label='x1 trajectory')
-    
     # t_idx 강조
     plt.scatter(pos_x0[t_idx, 1], pos_x0[t_idx, 0], color='red', s=100, label=f'x0 at t={t_idx}')
     plt.scatter(pos_x0_prime[t_idx, 1], pos_x0_prime[t_idx, 0], color='purple', s=100, label=f'x0_prime at t={t_idx}')
     plt.scatter(pos_x1[t_idx, 1], pos_x1[t_idx, 0], color='black', s=100, label=f'x0 at t={t_idx}')
-    
     # 두 점 연결
     plt.plot([pos_x0[t_idx, 1], pos_x0_prime[t_idx, 1]], 
              [pos_x0[t_idx, 0], pos_x0_prime[t_idx, 0]], 
              'r--', label='Connection at t_idx')
-    
     plt.title('Trajectories of x0 and x0_prime')
     plt.xlabel('pos_x')
     plt.ylabel('pos_y')
     plt.legend()
     plt.grid(True)
+    # x축과 y축 범위를 [-1, 1]로 설정
+    plt.xlim(-1, 1)
+    plt.ylim(-1, 1)
+    # 축 비율을 동일하게 설정 (정사각형 플롯 보장)
+    plt.gca().set_aspect('equal')
+    # Y축 반전 추가
+    plt.gca().invert_yaxis()
     
     # 2. CBF_value 그래프 - detach() 추가
     plt.subplot(3, 1, 2)
