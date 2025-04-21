@@ -225,191 +225,204 @@ class CFM(nn.Module):
         
         return loss, info
   
-    def violation_forecasting(self, cond, *args, **kwargs): #CBF wise로 받게
-        #1. init) x0 = [c, c,c,c,c,....,c]
-        batch_size = len(cond[0])
-        horizon = self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
-        x0 = torch.randn(shape).to(self.device)
-        # CBF 중심 좌표 추출 (첫 번째 장애물 사용)
+    def violation_forecasting(self, x0, x1): #CBF wise로 받게
+        # CBF 중심 좌표 추출 (두 번째 장애물 사용) - 수정된 부분
+        n=2
         off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
         off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        pos_y = torch.full((batch_size, horizon), off_y, device=self.device)
-        pos_x = torch.full((batch_size, horizon), off_x, device=self.device)
-        x0[:, :, self.action_dim] = pos_y
-        x0[:, :, self.action_dim + 1] = pos_x
+        pos_y = torch.full((1, self.horizon), off_y, device=self.device)
+        pos_x = torch.full((1, self.horizon), off_x, device=self.device)
 
-        #2. [c, c,c,c,c,....,c] -> [start, c,c,c,c,....,end]
-        x0 = apply_conditioning(x0, cond, self.action_dim)
+        # 기존 v0 대신 장애물 중심에서 x1으로 향하는 벡터 계산
+        # 로봇 위치 추출
+        x1_pos_y = x1[:, :, self.action_dim]
+        x1_pos_x = x1[:, :, self.action_dim + 1]
 
-        #3. v0 구하기
-        t_batch = torch.zeros((batch_size,), device=self.device) # same with torch.full((x.shape[0],), t=0, device=x.device)
-        v0 = self.model(x0, None, t_batch) 
+        # 장애물 중심에서 로봇 위치로 향하는 벡터 계산
+        v_y = x1_pos_y - pos_y  # 로봇 y 위치 - 장애물 y 중심
+        v_x = x1_pos_x - pos_x  # 로봇 x 위치 - 장애물 x 중심
+
+        # 새로운 방향 벡터를 원래 v0의 형태로 복사
+        v0 = x1.clone()
+        v0[:, :, self.action_dim] = v_y    # 속도 y 성분
+        v0[:, :, self.action_dim + 1] = v_x  # 속도 x 성분
         
-        # 4. 닫힌 형식으로 r0(CBF 경계까지의 거리) 계산
+        # 4. 2제곱 슈퍼 타원에 대한 CBF 경계까지의 거리 계산
         # 위치 및 속도 성분 추출
-        pos_y = x0[:, :, self.action_dim]      # 위치 y 성분 (batch_size, horizon)
-        pos_x = x0[:, :, self.action_dim + 1]  # 위치 x 성분 (batch_size, horizon)
+        # 위치 및 속도 성분 추출
         v_y = v0[:, :, self.action_dim]        # 속도 y 성분 (batch_size, horizon)
         v_x = v0[:, :, self.action_dim + 1]    # 속도 x 성분 (batch_size, horizon)
-        # CBF1 매개변수 (타원형 장애물)
+        
+        # CBF 매개변수 (2차 슈퍼타원)
         yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
-        off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
-        off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        
-        denominator = ((v_y/yr)**2 + (v_x/xr)**2)**(1/2)
-        r0 = (1 + 1e-2)**(1/2) / denominator
+    
+        denominator = ((v_y/yr)**n + (v_x/xr)**2)**(1/n)
+        r0 = (1 + 1e-2)**(1/n) / denominator
         #r0 = torch.clamp(r0, min=0.1, max=10.0)
 
         #5. x'0와 x1 (one-shot) 구하기
-        x0_prime = x0.clone()
-        x0_prime[:, :, self.action_dim:self.action_dim+2] = x0[:, :, self.action_dim:self.action_dim+2] + r0.unsqueeze(-1) * v0[:, :, self.action_dim:self.action_dim+2]
-        x1 = x0.clone()
-        x1[:, :, self.action_dim:self.action_dim+2] = x0[:, :, self.action_dim:self.action_dim+2] + v0[:, :, self.action_dim:self.action_dim+2]
+        x0_prime = x1.clone()
+        x0_prime[:, :, self.action_dim] = pos_y
+        x0_prime[:, :, self.action_dim + 1] = pos_x
+        x0_prime[:, :, self.action_dim:self.action_dim+2] = x0_prime[:, :, self.action_dim:self.action_dim+2] + r0.unsqueeze(-1) * v0[:, :, self.action_dim:self.action_dim+2]
 
-        #6. v'0 구하기
-        v0_prime = self.model(x0_prime, None, t_batch)
-        
-        #7. v0 * v'0 값 구하기 & [0,1]로 step = f ============================================================
-        v0_pos = v0[:, :, self.action_dim:self.action_dim+2]
-        v0_prime_pos = v0_prime[:, :, self.action_dim:self.action_dim+2]
-            # 내적 계산 (normalize해서 cos 값 구하기)
-        v0_norm = torch.norm(v0_pos, dim=2, keepdim=True)
-        v0_prime_norm = torch.norm(v0_prime_pos, dim=2, keepdim=True)
-        cosine_sim = torch.sum(v0_pos * v0_prime_pos, dim=2) / (v0_norm.squeeze(-1) * v0_prime_norm.squeeze(-1) + 1e-8)
-        # #print(cosine_sim)
-            # 위반 점수 계산 (1 - cosine_sim로 방향 변화 측정)
-        # cosine_bin 계산: cosine_sim > 0이면 1, 아니면 0 할당
-        cosine_bin = (cosine_sim > 0).float()
-        # 위치 성분(pos_y, pos_x)만 추출하여 거리 계산
-        distance = torch.norm( # CBF 예상위치(x1)와 가장 먼 위치(x0_prime) 찾기
-            x1[:, :, self.action_dim:self.action_dim*2] - 
-            x0_prime[:, :, self.action_dim:self.action_dim*2], 
-            dim=2
-        )  # (batch_size, horizon)
-        # 수정된 violation_score 계산
-        #violation_score = (1 - cosine_bin) * distance
+        # x1의 위치 좌표 추출
+        x1_pos_y = x1[:, :, self.action_dim]
+        x1_pos_x = x1[:, :, self.action_dim + 1]
 
-                # x1의 위치 좌표 추출
-        x1_pos_y = x1[:, :, self.action_dim]      # 위치 y 성분 (batch_size, horizon)
-        x1_pos_x = x1[:, :, self.action_dim + 1]  # 위치 x 성분 (batch_size, horizon)
-
-        # CBF 값 계산 (타원형 장애물)
-        cbf_value = ((x1_pos_y - off_y)/yr)**2 + ((x1_pos_x - off_x)/xr)**2 - 1 - 0.01
-
-        # CBF 위반 여부 확인 (음수면 위반)
-        cbf_violation = (cbf_value < 0).float()
-
-        violation_score = cbf_violation * (1 - cosine_bin) * distance
-        # =================================================================================================
+        # 2제곱 슈퍼 타원 CBF 값 계산
+        cbf_value = ((x1_pos_y - off_y)/yr)**n + ((x1_pos_x - off_x)/xr)**n - 1 - 0.01
 
         #8. 가장 심각한 위반 지점 찾기
-        batch_indices = torch.arange(batch_size, device=self.device)
-        time_indices = torch.argmax(violation_score, dim=1)
-        
-        #9. sub_goals = (t, traj[t])
-        for i in range(batch_size):
-            t_idx = time_indices[i].item()
-            sub_goals = x0_prime[i, t_idx, self.action_dim:].unsqueeze(0)
+        time_indices = torch.argmin(cbf_value, dim=1)
+        t_idx = time_indices[0].item()
 
-            # 시각화 함수 호출
-        visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_value, cosine_sim, t_idx, self.action_dim, "analy_1")
+        if t_idx != 0:
+            #9. find sub_goal's velocity
+            y_velocity = (1/xr)**n * (x0_prime[0, t_idx, self.action_dim+1] - off_x)**(n-1)
+            x_velocity = -(1/yr)**n * (x0_prime[0, t_idx, self.action_dim] - off_y)**(n-1)
+            p_velocity = torch.stack([y_velocity, x_velocity])
+            p_velocity = p_velocity / torch.norm(p_velocity, dim=0)
+            size_of_v = torch.norm(x1[0, t_idx, 2*self.action_dim:])
+            # dot product of p_velocity and v0
+            # 시간 순서를 고려한 위반 구간 찾기
+            violation_indices = torch.where(cbf_value[0] < 0)[0]
+            entry_idx = violation_indices.min()  # 첫 위반 지점
+            exit_idx = violation_indices.max()   # 마지막 위반 지점
+            
+            in_point = x1[0, entry_idx, self.action_dim:2*self.action_dim]
+            out_point = x1[0, exit_idx, self.action_dim:2*self.action_dim]
+            in_out_v = out_point - in_point
+            cosine_sim = torch.dot(p_velocity, in_out_v)
+            if cosine_sim < 0:
+                sign = -1
+            else:
+                sign = 1
+            x0_prime[0, t_idx, 2*self.action_dim:] = p_velocity * size_of_v * sign 
+
+
+        #9. sub_goals = (t, traj[t])
+        sub_goals = x0_prime[0, t_idx, self.action_dim:].unsqueeze(0)
+
+        #visualize_cbf_violation_cos(x0, x0_prime, x1, v0, cbf_value, cosine_sim, t_idx, self.action_dim, "analy_2")
+        visualize_cbf_violation(x0, x0_prime, x1, cbf_value, t_idx, self.action_dim, "analy_1")
 
         t_idx = (((t_idx+2)//4)*4) # conv 구조가 stride떄문에 4의 배수 horizon만 받음... 따라서 t에 오차가 생기는데 추후 수정필
         return t_idx, sub_goals
 
-    def violation_forecasting2(self, cond, *args, **kwargs): #CBF wise로 받게
-        #1. init) x0 = [c, c,c,c,c,....,c]
-        batch_size = len(cond[0])
-        horizon = self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
-        x0 = torch.randn(shape).to(self.device)
-        
+    def violation_forecasting2(self, x0, x1): #CBF wise로 받게
         # CBF 중심 좌표 추출 (두 번째 장애물 사용) - 수정된 부분
+        n=4
         off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
         off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        pos_y = torch.full((batch_size, horizon), off_y, device=self.device)
-        pos_x = torch.full((batch_size, horizon), off_x, device=self.device)
-        x0[:, :, self.action_dim] = pos_y
-        x0[:, :, self.action_dim + 1] = pos_x
+        pos_y = torch.full((1, self.horizon), off_y, device=self.device)
+        pos_x = torch.full((1, self.horizon), off_x, device=self.device)
 
-        #2. [c, c,c,c,c,....,c] -> [start, c,c,c,c,....,end]
-        x0 = apply_conditioning(x0, cond, self.action_dim)
+        # 로봇 위치 추출
+        x1_pos_y = x1[:, :, self.action_dim]
+        x1_pos_x = x1[:, :, self.action_dim + 1]
 
-        #3. v0 구하기
-        t_batch = torch.zeros((batch_size,), device=self.device) # same with torch.full((x.shape[0],), t=0, device=x.device)
-        v0 = self.model(x0, None, t_batch) 
-        
+        # 장애물 중심에서 로봇 위치로 향하는 벡터 계산
+        v_y = x1_pos_y - pos_y  # 로봇 y 위치 - 장애물 y 중심
+        v_x = x1_pos_x - pos_x  # 로봇 x 위치 - 장애물 x 중심
+
+        # 새로운 방향 벡터를 원래 v0의 형태로 복사
+        v = x1.clone()
+        v[:, :, self.action_dim] = v_y    # 속도 y 성분
+        v[:, :, self.action_dim + 1] = v_x  # 속도 x 성분
+
+
         # 4. 4제곱 슈퍼 타원에 대한 CBF 경계까지의 거리 계산
         # 위치 및 속도 성분 추출
         # 위치 및 속도 성분 추출
-        pos_y = x0[:, :, self.action_dim]      # 위치 y 성분 (batch_size, horizon)
-        pos_x = x0[:, :, self.action_dim + 1]  # 위치 x 성분 (batch_size, horizon)
-        v_y = v0[:, :, self.action_dim]        # 속도 y 성분 (batch_size, horizon)
-        v_x = v0[:, :, self.action_dim + 1]    # 속도 x 성분 (batch_size, horizon)
+        v_y = v[:, :, self.action_dim]        # 속도 y 성분 (batch_size, horizon)
+        v_x = v[:, :, self.action_dim + 1]    # 속도 x 성분 (batch_size, horizon)
         
         # CBF 매개변수 (4차 슈퍼타원)
         yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
     
-        denominator = ((v_y/yr)**4 + (v_x/xr)**4)**(1/4)
-        r0 = (1 + 1e-2)**(1/4) / denominator
+        denominator = ((v_y/yr)**n + (v_x/xr)**n)**(1/n)
+        r0 = (1 + 1e-2)**(1/n) / denominator
         #r0 = torch.clamp(r0, min=0.1, max=10.0)
 
         #5. x'0와 x1 (one-shot) 구하기
-        x0_prime = x0.clone()
-        x0_prime[:, :, self.action_dim:self.action_dim+2] = x0[:, :, self.action_dim:self.action_dim+2] + r0.unsqueeze(-1) * v0[:, :, self.action_dim:self.action_dim+2]
-        x1 = x0.clone()
-        x1[:, :, self.action_dim:self.action_dim+2] = x0[:, :, self.action_dim:self.action_dim+2] + v0[:, :, self.action_dim:self.action_dim+2]
-
-        # 위치 성분 간 거리 계산
-        distance = torch.norm(
-            x1[:, :, self.action_dim:self.action_dim*2] - 
-            x0_prime[:, :, self.action_dim:self.action_dim*2], 
-            dim=2
-        )  # (batch_size, horizon)
+        x0_prime = x1.clone()
+        x0_prime[:, :, self.action_dim] = pos_y
+        x0_prime[:, :, self.action_dim + 1] = pos_x
+        x0_prime[:, :, self.action_dim:self.action_dim+2] = x0_prime[:, :, self.action_dim:self.action_dim+2] + r0.unsqueeze(-1) * v[:, :, self.action_dim:self.action_dim+2]
 
         # x1의 위치 좌표 추출
         x1_pos_y = x1[:, :, self.action_dim]
         x1_pos_x = x1[:, :, self.action_dim + 1]
 
         # 4제곱 슈퍼 타원 CBF 값 계산
-        cbf_value = ((x1_pos_y - off_y)/yr)**4 + ((x1_pos_x - off_x)/xr)**4 - 1 - 0.01
-
-        # CBF 위반 여부 확인 (음수면 위반)
-        cbf_violation = (cbf_value < 0).float()
-
-        #================== andgle noise -- oneshot noise둘다 사용
-        v0_prime = self.model(x0_prime, None, t_batch)
-        v0_pos = v0[:, :, self.action_dim:self.action_dim+2]
-        v0_prime_pos = v0_prime[:, :, self.action_dim:self.action_dim+2]
-        v0_norm = torch.norm(v0_pos, dim=2, keepdim=True)
-        v0_prime_norm = torch.norm(v0_prime_pos, dim=2, keepdim=True)
-        cosine_sim = torch.sum(v0_pos * v0_prime_pos, dim=2) / (v0_norm.squeeze(-1) * v0_prime_norm.squeeze(-1) + 1e-8)
-        cosine_bin = (cosine_sim > -0.25).float()
-        #==================
-
-        # 위반 점수 계산
-        violation_score = cbf_violation * (1 - cosine_bin) * distance
+        cbf_value = ((x1_pos_y - off_y)/yr)**n + ((x1_pos_x - off_x)/xr)**n - 1 - 0.01
 
         #8. 가장 심각한 위반 지점 찾기
-        batch_indices = torch.arange(batch_size, device=self.device)
-        time_indices = torch.argmax(violation_score, dim=1)
+        time_indices = torch.argmin(cbf_value, dim=1)
+        t_idx = time_indices[0].item()
         
-        #9. sub_goals = (t, traj[t])
-        for i in range(batch_size):
-            t_idx = time_indices[i].item()
-            sub_goals = x0_prime[i, t_idx, self.action_dim:].unsqueeze(0)
+        if t_idx != 0: # find sub_goal's velocity
+            # why do this?
+            # trajectory dependent on velocity
+            # so, if we can find reasonabel vel, it will be helpful while generating trajectory
+            # way)
+            # 1. get tangent vector
+            y_velocity = (1/xr)**n * (x0_prime[0, t_idx, self.action_dim+1] - off_x)**(n-1)
+            x_velocity = -(1/yr)**n * (x0_prime[0, t_idx, self.action_dim] - off_y)**(n-1)
+            p_velocity = torch.stack([y_velocity, x_velocity])
+            p_velocity = p_velocity / torch.norm(p_velocity, dim=0)
+            size_of_v = torch.norm(x1[0, t_idx, 2*self.action_dim:])
+            # 2. choosing direction simmilar to the trajectory violate the cbf
+            violation_indices = torch.where(cbf_value[0] < 0)[0]
+            entry_idx = violation_indices.min()  # 첫 위반 지점
+            exit_idx = violation_indices.max()   # 마지막 위반 지점
+            
+            in_point = x1[0, entry_idx, self.action_dim:2*self.action_dim]
+            out_point = x1[0, exit_idx, self.action_dim:2*self.action_dim]
+            in_out_v = out_point - in_point
+            cosine_sim = torch.dot(p_velocity, in_out_v)
+            if cosine_sim < 0:
+                sign = -1
+            else:
+                sign = 1
+            x0_prime[0, t_idx, 2*self.action_dim:] = p_velocity * size_of_v * sign 
 
-        visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_value, cosine_sim, t_idx, self.action_dim, "analy_2")
+        #9. sub_goals = (t, traj[t])
+        sub_goals = x0_prime[0, t_idx, self.action_dim:].unsqueeze(0)
+
+        #visualize_cbf_violation_cos(x0, x0_prime, x1, v0, cbf_value, cosine_sim, t_idx, self.action_dim, "analy_2")
+        visualize_cbf_violation(x0, x0_prime, x1, cbf_value, t_idx, self.action_dim, "analy_2")
 
         t_idx = (((t_idx+2)//4)*4) # conv 구조가 stride떄문에 4의 배수 horizon만 받음... 따라서 t에 오차가 생기는데 추후 수정필
         return t_idx, sub_goals
 
     def forward(self, cond, *args, **kwargs):
-        t, sub_goal = self.violation_forecasting(cond,  *args, **kwargs)
-        t2, sub_goal2 = self.violation_forecasting2(cond,  *args, **kwargs)
+        #1. init) x0 [start, noise, noise, noise, noise, ...., end]
+        batch_size = len(cond[0])
+        horizon = self.horizon
+        shape = (batch_size, horizon, self.transition_dim)
+        x0 = torch.randn(shape).to(self.device)
+        x0 = apply_conditioning(x0, cond, self.action_dim)
+        
+        #3. v0 구하기
+        t_batch = torch.zeros((batch_size,), device=self.device) # same with torch.full((x.shape[0],), t=0, device=x.device)
+        v0 = self.model(x0, None, t_batch) 
+
+        #4. x1_pred 구하기
+        x1_pred = x0.clone()
+        x1_pred = x0 + v0
+        #====================================================== # 
+        # todo)
+        # 1. now is using velocitys as 0 but use x1_pred  <-  vertical to contact line
+        # 2. make CBF as Class
+        #====================================================== # 
+
+
+        t, sub_goal = self.violation_forecasting(x0, x1_pred)
+        t2, sub_goal2 = self.violation_forecasting2(x0, x1_pred)
 
         sub_goal_list = []
         sub_goal_list.append([0, cond[0]])
@@ -427,16 +440,16 @@ class CFM(nn.Module):
             cond_temp = {}
 
             #make speed 0
-            zero_speed1 = sub_goal_list[i][1].clone()
-            zero_speed1[:, self.action_dim:] = 0.0
-            cond_temp[0] = zero_speed1
-            #cond_temp[0] = sub_goal_list[i][1]
+            #zero_speed1 = sub_goal_list[i][1].clone()
+            #zero_speed1[:, self.action_dim:] = 0.0
+            #cond_temp[0] = zero_speed1
+            cond_temp[0] = sub_goal_list[i][1]
 
             #make speed 0
-            zero_speed2 = sub_goal_list[i+1][1].clone()
-            zero_speed2[:, self.action_dim:] = 0.0
-            cond_temp[step_temp -1] = zero_speed2
-            #cond_temp[step_temp -1] = sub_goal_list[i+1][1]
+            #zero_speed2 = sub_goal_list[i+1][1].clone()
+            #zero_speed2[:, self.action_dim:] = 0.0
+            #cond_temp[step_temp -1] = zero_speed2
+            cond_temp[step_temp -1] = sub_goal_list[i+1][1]
             cond_list.append(cond_temp)
             step_list.append(step_temp)
 
@@ -459,29 +472,21 @@ class CFM(nn.Module):
         print(x1.shape)
         
         return x1, traj
-
-    def forward_orig(self, cond, *args, **kwargs):
-        return self.conditional_sample(cond=cond, *args, **kwargs)
     
 
-# =========== under is func for visualization =========
-
-def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, action_dim, name):
+# =========== under is func for visualization ============
+def visualize_cbf_violation(x0, x0_prime, x1, cbf_vi, t_idx, action_dim, name):
     # 배치 차원이 있으면 첫 번째 배치만 사용
     if x0.dim() > 2:
         batch_idx = 0
         x0 = x0[batch_idx]
         x0_prime = x0_prime[batch_idx]
         x1 = x1[batch_idx]
-        v0 = v0[batch_idx]
     
     # 위치 정보 추출 (pos_y, pos_x) - detach() 추가
     pos_x0 = x0[:, action_dim:action_dim+2].detach().cpu().numpy()
     pos_x0_prime = x0_prime[:, action_dim:action_dim+2].detach().cpu().numpy()
     pos_x1 = x1[:, action_dim:action_dim+2].detach().cpu().numpy()
-    
-    # 벡터 정보 추출 (v_y, v_x) - detach() 추가
-    v0_pos = v0[:, action_dim:action_dim+2].detach().cpu().numpy()
     
         # 기존 figure 설정 대신 사용
     plt.figure(figsize=(15, 8))  # 전체 figure 크기 조정
@@ -492,7 +497,7 @@ def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, act
     # 1. 궤적 시각화 (왼쪽 전체 영역 사용)
     ax1 = plt.subplot(gs[:, 0])  # 왼쪽 열 전체 사용
     # 기존 궤적 그리기 코드...
-    plt.plot(pos_x0[:, 1], pos_x0[:, 0], 'b-', label='x0 trajectory')
+    #plt.plot(pos_x0[:, 1], pos_x0[:, 0], 'b-', label='x0 trajectory')
     plt.plot(pos_x0_prime[:, 1], pos_x0_prime[:, 0], 'g-', label='x0_prime trajectory')
     plt.plot(pos_x1[:, 1], pos_x1[:, 0], 'r-', label='x1 trajectory')
     # t_idx 강조
@@ -529,9 +534,9 @@ def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, act
 
     # 3. cosine_sim 그래프 (오른쪽 하단)
     ax3 = plt.subplot(gs[1, 1])
-    time_steps = np.arange(len(cosine_sim[0]))
-    plt.plot(time_steps, cosine_sim[0].detach().cpu().numpy(), 'b-', label='cosine_sim')
-    plt.scatter(t_idx, cosine_sim[0][t_idx].detach().cpu().numpy(), color='red', s=100)
+    time_steps = np.arange(len(cbf_vi[0]))
+    plt.plot(time_steps, cbf_vi[0].detach().cpu().numpy(), 'b-', label='cosine_sim')
+    plt.scatter(t_idx, cbf_vi[0][t_idx].detach().cpu().numpy(), color='red', s=100)
     plt.axhline(y=0, color='r', linestyle='--', label='cosine_sim = 0')
     plt.title('Cosine Similarity between v0 and v0_prime')
     plt.xlabel('Time Step')
@@ -542,6 +547,7 @@ def visualize_cbf_violation(x0, x0_prime, x1, v0, cbf_vi, cosine_sim, t_idx, act
     plt.tight_layout()
     plt.savefig(name + 'trajectory_and_CBF_and_cosine.png')
     plt.close()
+
 
 def visualize_trajectory(x1_list, action_dim, title="trajectory Visualization", save_path="trajectory_visualization.png"):
     """
