@@ -4,6 +4,7 @@ from torch import nn
 import torchdiffeq
 from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 from torchdyn.core import NeuralODE
+from diffuser.models import cbf
 import diffuser.utils as utils
 import pdb
 from .helpers import (
@@ -35,6 +36,13 @@ class CFM(nn.Module):
         loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
         self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
 
+        # Safety
+        self.safety_enabled = False
+        self.cbf = None
+        self.norm_mins = 0
+        self.norm_maxs = 0
+        self.safe1 = 0
+        self.safe2 = 0
 
         # Settings for compatibility with diffusion models (Not important for CFM)
         betas = cosine_beta_schedule(n_timesteps)
@@ -114,6 +122,23 @@ class CFM(nn.Module):
         t_batch = torch.full((x.shape[0],), t, device=x.device)
         vt = self.model(x_cond, None, t_batch)
         
+        # if self.safety_enabled and self.cbf is not None:
+        #     # Flatten: x, vt are [B, H, D]
+        #     B, H, D = vt.shape
+        #     corrected = torch.zeros_like(vt)
+
+        #     for h in range(H):
+        #         x_cur  = x[:, h:h+1, :]               # [B,1,D]
+        #         x_next = x_cur + vt[:, h:h+1, :]      # naive next-step
+
+        #         x_corr, safe_vals = self.cbf.apply(x_cur, x_next, t=t)
+        #         corrected[:, h:h+1, :] = x_corr - x_cur  # corrected vt
+
+        #         # (Optional) log safety metrics
+        #         # print(f"[t={t:.3f}] h={h}: min safety = {[v.item() for v in safe_vals]}")
+
+        #     return corrected  # [B, H, D]
+    
         return vt
 
     @torch.no_grad()
@@ -127,6 +152,23 @@ class CFM(nn.Module):
         # 2. Compute vector field on the conditioned state
         t_batch = torch.full((x.shape[0],), t, device=x.device)
         vt = self.model(x_cond, None, t_batch)
+
+        # if self.safety_enabled and self.cbf is not None:
+        #     # Flatten: x, vt are [B, H, D]
+        #     B, H, D = vt.shape
+        #     corrected = torch.zeros_like(vt)
+
+        #     for h in range(H):
+        #         x_cur  = x[:, h:h+1, :]               # [B,1,D]
+        #         x_next = x_cur + vt[:, h:h+1, :]      # naive next-step
+
+        #         x_corr, safe_vals = self.cbf.apply(x_cur, x_next, t=t)
+        #         corrected[:, h:h+1, :] = x_corr - x_cur  # corrected vt
+
+        #         # (Optional) log safety metrics
+        #         # print(f"[t={t:.3f}] h={h}: min safety = {[v.item() for v in safe_vals]}")
+
+        #     return corrected  # [B, H, D]
         
         return vt
 
@@ -168,6 +210,47 @@ class CFM(nn.Module):
             trajectory_list.append(x1) # append last step x
             return x1, torch.stack(trajectory_list, dim=1)
         return x1
+    
+    @torch.no_grad()
+    def p_sample_loop_ode_planning(self, shape, cond, verbose=True, record_traj=False):
+        """
+        Solve ODE planning with explicit control-corrected RHS (e.g., CBF applied)
+        """
+        x0 = torch.randn(shape).to(self.device)
+        x0 = apply_conditioning(x0, cond, self.action_dim)
+
+        T = self.n_timesteps + 1
+        time = torch.linspace(0, 1, T).to(self.device)
+        traj = [x0]
+
+        for i in range(1, T):
+            t_now = time[i-1]
+            x_now = traj[-1]
+
+            B = x_now.shape[0]
+            t_batch = torch.full((B,), t_now, device=x_now.device)
+
+            # Step forward via some base policy (e.g., learned dynamics model)
+            u_raw = self.model(x_now, None, t_batch)  # [B, H, D] - same shape as dx/dt
+
+            # CBF correction
+            if self.safety_enabled and self.cbf is not None:
+                x_next_naive = x_now + u_raw * (1. / self.n_timesteps)
+                x_corr, _ = self.cbf.apply(x_now, x_next_naive, t=t_now)
+                dx = x_corr - x_now
+            else:
+                dx = u_raw * (1. / self.n_timesteps)
+
+            x_next = x_now + dx
+            x_next = apply_conditioning(x_next, cond, self.action_dim)
+
+            traj.append(x_next)
+        traj_tensor = torch.stack(traj, dim=1)  # [T, B, H, D]
+        
+        if record_traj:
+            return traj_tensor[-1], traj_tensor  # sample, diffusion_paths
+        else:
+            return traj_tensor[-1]               # just sample
 
     @torch.no_grad()
     def conditional_sample(self, cond, *args, horizon=None, record_traj=True, **kwargs):
@@ -178,8 +261,11 @@ class CFM(nn.Module):
         batch_size = len(cond[0])
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
-
-        return self.p_sample_loop(shape, cond, record_traj=record_traj, *args, **kwargs)
+        
+        if self.safety_enabled: # Planning
+            return self.p_sample_loop_ode_planning(shape, cond, record_traj=record_traj, *args, **kwargs)
+        else: # Training
+            return self.p_sample_loop(shape, cond, record_traj=record_traj, *args, **kwargs)
 
     @property
     def device(self):

@@ -199,5 +199,15 @@ maze2d_large_v1 = {
     'plan': {
         'horizon': 384,
         'n_diffusion_steps': 256,  # 256 debug
+
+        ## CBF
+        'obstacles': [
+            {'type': 'circle', 'center': (5.8, 5.0), 'radius': 1},
+            {'type': '4th',    'center': (5.3, 2.0), 'radius': 1},
+        ],
+        'cbf_solver': 'qp',   # 'qp', 'closed_form'
+        'cbf_method': 'time', # 'normal', 'relax', 'time'
+        'robust_term': 0.01,  # 0.01, 0.1
+        'relax_threshold': 0.90,
     },
 }

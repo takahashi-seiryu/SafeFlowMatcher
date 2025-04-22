@@ -5,6 +5,7 @@ import pdb
 from torch.autograd import Variable
 from qpth.qp import QPFunction, QPSolvers
 import einops
+from diffuser.models.cbf import CBF
 
 import diffuser.utils as utils
 from .helpers import (
@@ -98,7 +99,9 @@ class GaussianDiffusion(nn.Module):
         self.transition_dim = observation_dim + action_dim
         self.model = model
 
-        # For safety
+        # Safety
+        self.safety_enabled = False
+        self.cbf = None
         self.norm_mins = 0
         self.norm_maxs = 0
         self.safe1 = 0
@@ -185,6 +188,19 @@ class GaussianDiffusion(nn.Module):
         return loss_weights
     
     #------------------------------------------ Safety (Only for Sampling) ------------------------------------------#
+    """
+    Shield: Truncate the trajectory to be within the safe set.
+    GD: Classifier guidance or potential-based method.
+    invariance_umaze: Robust Safe Diffuser (RoS-diffuser) for umaze
+    invariance_umaze_relax: Relaxed Safe Diffuser (ReS-diffuser) for umaze
+    invariance: Robust Safe Diffuser (RoS-diffuser) for maze2d-large-v1
+    invariance_cf: Robust Safe Diffuser (RoS-diffuser) for maze2d-large-v1 (closed form solution)
+    invariance_relax: Relaxed Safe Diffuser (ReS-diffuser) for maze2d-large-v1
+    invariance_relax_cf: Relaxed Safe Diffuser (ReS-diffuser) for maze2d-large-v1 (closed form solution)
+    invariance_relax_narrow: Relaxed Safe Diffuser (ReS-diffuser) for maze2d-large-v1 (narrow corridor)
+    invariance_time: Time-varying RoS-diffuser for maze2d-large-v1
+    invariance_time_cf: Time-varying RoS-diffuser for maze2d-large-v1 (closed form solution)
+    """
 
     @torch.no_grad()
     def Shield(self, x0, xp10):
@@ -426,6 +442,7 @@ class GaussianDiffusion(nn.Module):
         """
         Robust Safe Diffuser (RoS-diffuser) for maze2d-large-v1       
         """
+        # [1, batch_size, dim] -> [batch_size, dim]
         x = x.squeeze(0)
         xp1 = xp1.squeeze(0)
 
@@ -1061,64 +1078,76 @@ class GaussianDiffusion(nn.Module):
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
 
         xp1 = model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
-        x = xp1
-        # Note:  choose any one of the below
-        #---------------------------------------start--------------------------------------------------#
-        ####################### original diffuser only
-        # x = xp1      
-        # xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
-        # yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
-        # off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        # off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
-        # b = ((x[:,2:3] - off_y)/yr)**2 + ((x[:,3:4] - off_x)/xr)**2 - 1
-        # self.safe1 = torch.min(b[:,0])
-        # xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
-        # yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
-        # off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        # off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
-        # b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1
-        # self.safe2 = torch.min(b[:,0])
-
-        ####################### truncate (shield) and GD (classifier-guidance/potential-based)
-        # x = self.Shield(x, xp1)
-        # x = self.GD(x, xp1)
-
-        ####################### SafeDiffusers 
-        # x = self.invariance(x, xp1)    # RoS
-        # x = self.invariance_cf(x, xp1)  # RoS closed form
-        # x = self.invariance_relax(x, xp1, t) # ReS
-        # x = self.invariance_relax_cf(x, xp1, t)   #ReS closed form    
-        # x = self.invariance_time(x, xp1, t)   # TVS
-        # x = self.invariance_time_cf(x, xp1, t)  # TVS closed form
-        # x = self.invariance_relax_narrow(x, xp1, t)  # narrow passage case
-
-        ####################### Applying SafeDiffusers to only the last 10 steps
-        # if t <= 10:  #10
-        #     # x = self.invariance_relax(x, xp1, t)  #done
-        #     # x = self.invariance_relax_narrow(x, xp1, t)
-
-        #     x = self.GD(x, xp1)
-        # else:
-        #     x = xp1
-        #     xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
-        #     yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
-        #     off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        #     off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
-        #     b = ((x[:,2:3] - off_y)/yr)**2 + ((x[:,3:4] - off_x)/xr)**2 - 1
-        #     self.safe1 = torch.min(b[:,0])
-        #     xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
-        #     yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
-        #     off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        #     off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
-        #     b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1
-        #     self.safe2 = torch.min(b[:,0])
-
         
-        ###################### umaze case
-        # x = self.invariance_umaze(x, xp1)   #umaze
-        # x = self.invariance_umaze_relax(x, xp1, t)   #umaze
-        #-----------------------------------------end--------------------------------------------------#
-        return x
+        if not self.safety_enabled:
+            return xp1
+        elif self.safety_enabled and self.cbf is not None:
+            # Note:  choose any one of the below
+            #---------------------------------------start--------------------------------------------------#
+            ####################### Control Barrier Function (CBF) from cbf.py
+            # x, safe_vals = self.cbf.apply(x, xp1, t)
+            # self.safe1 = safe_vals[0]
+            # self.safe2 = safe_vals[1]
+
+            ####################### original diffuser only
+            # x = xp1
+
+            # # obstacle 1: ((x - c)/r)² - 1 < 0
+            # xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
+            # yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
+            # off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+            # off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+            # b = ((x[:,2:3] - off_y)/yr)**2 + ((x[:,3:4] - off_x)/xr)**2 - 1
+            # self.safe1 = torch.min(b[:,0])
+            
+            # # obstacle 2: ((x - c)/r)^4 - 1 < 0
+            # xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
+            # yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
+            # off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+            # off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+            # b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1
+            # self.safe2 = torch.min(b[:,0])
+
+            ####################### truncate (shield) and GD (classifier-guidance/potential-based)
+            # x = self.Shield(x, xp1)
+            # x = self.GD(x, xp1)
+
+            ####################### SafeDiffusers 
+            x = self.invariance(x, xp1)    # RoS
+            # x = self.invariance_cf(x, xp1)  # RoS closed form
+            # x = self.invariance_relax(x, xp1, t) # ReS
+            # x = self.invariance_relax_cf(x, xp1, t)   #ReS closed form    
+            # x = self.invariance_time(x, xp1, t)   # TVS
+            # x = self.invariance_time_cf(x, xp1, t)  # TVS closed form
+            # x = self.invariance_relax_narrow(x, xp1, t)  # narrow passage case
+
+            ####################### Applying SafeDiffusers to only the last 10 steps
+            # if t <= 10:  #10
+            #     # x = self.invariance_relax(x, xp1, t)  #done
+            #     # x = self.invariance_relax_narrow(x, xp1, t)
+
+            #     x = self.GD(x, xp1)
+            # else:
+            #     x = xp1
+            #     xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
+            #     yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
+            #     off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+            #     off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+            #     b = ((x[:,2:3] - off_y)/yr)**2 + ((x[:,3:4] - off_x)/xr)**2 - 1
+            #     self.safe1 = torch.min(b[:,0])
+            #     xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
+            #     yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
+            #     off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+            #     off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+            #     b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1
+            #     self.safe2 = torch.min(b[:,0])
+
+            
+            ###################### umaze case
+            # x = self.invariance_umaze(x, xp1)   #umaze
+            # x = self.invariance_umaze_relax(x, xp1, t)   #umaze
+            #-----------------------------------------end--------------------------------------------------#
+            return x
 
     @torch.no_grad()
     def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False):

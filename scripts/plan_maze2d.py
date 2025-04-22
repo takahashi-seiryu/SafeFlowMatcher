@@ -54,7 +54,7 @@ diffusion.register_buffer('sqrt_recipm1_alphas_cumprod', torch.sqrt(1. / alphas_
 dataset = diffusion_experiment.dataset
 renderer = diffusion_experiment.renderer
 
-policy = Policy(diffusion, dataset.normalizer)
+policy = Policy(diffusion, dataset.normalizer, args)
 
 def makedirs(dirname):
     if not os.path.exists(dirname):

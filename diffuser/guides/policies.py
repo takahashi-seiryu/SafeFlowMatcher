@@ -3,6 +3,7 @@ from collections import namedtuple
 import torch
 import einops
 import pdb
+from diffuser.models.cbf import CBF
 
 import diffuser.utils as utils
 # from diffusion.datasets.preprocessing import get_policy_preprocess_fn
@@ -12,10 +13,24 @@ Trajectories = namedtuple('Trajectories', 'actions observations')
 
 class Policy:
 
-    def __init__(self, diffusion_model, normalizer):
+    def __init__(self, diffusion_model, normalizer, args):
         self.diffusion_model = diffusion_model
         self.normalizer = normalizer
         self.action_dim = normalizer.action_dim
+
+        # Enable control barrier function
+        device = next(diffusion_model.parameters()).device
+        norm_mins = torch.tensor(normalizer.normalizers['observations'].mins, device=device)
+        norm_maxs = torch.tensor(normalizer.normalizers['observations'].maxs, device=device)
+        obstacles = args.obstacles
+        cbf_solver = args.cbf_solver
+        cbf_method = args.cbf_method
+        robust_term = args.robust_term
+        relax_threshold = args.relax_threshold
+
+        self.diffusion_model.safety_enabled = True
+        self.diffusion_model.cbf = CBF(norm_mins, norm_maxs, obstacles, cbf_solver, \
+                                       cbf_method, robust_term, relax_threshold)
 
     @property
     def device(self):
