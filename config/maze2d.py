@@ -205,7 +205,7 @@ maze2d_large_v1 = {
             {'order': 2, 'center': (5.8, 5.0), 'radius': 1},
             {'order': 4, 'center': (5.3, 2.0), 'radius': 1},
         ],
-        'cbf_solver': 'qp',   # 'qp', 'closed_form'
+        'cbf_solver': 'closed_form',   # 'qp', 'closed_form'
         'cbf_method': 'robust', # 'robust', 'relax', 'time'
         'robust_term': 0.01,  # 0.01, 0.1
         'relax_threshold': 0.90,

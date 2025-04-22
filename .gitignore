@@ -3,10 +3,13 @@ __pycache__/
 **/__pycache__/
 *.egg-info/
 .DS_Store
+.hypothesis/
 
 # Logs
 logs/
 imgs/
+analy_*
+trajectory_segments.png
 
 gym/
 mujoco-py/

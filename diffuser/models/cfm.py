@@ -497,72 +497,75 @@ class CFM(nn.Module):
 
         t_idx = (((t_idx+2)//4)*4) # conv 구조가 stride떄문에 4의 배수 horizon만 받음... 따라서 t에 오차가 생기는데 추후 수정필
         return t_idx, sub_goals
-
+    
     def forward(self, cond, *args, **kwargs):
-        #1. init) x0 [start, noise, noise, noise, noise, ...., end]
-        batch_size = len(cond[0])
-        horizon = self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
-        x0 = torch.randn(shape).to(self.device)
-        x0 = apply_conditioning(x0, cond, self.action_dim)
+        return self.conditional_sample(cond=cond, *args, **kwargs)
+
+    # def forward(self, cond, *args, **kwargs):
+    #     #1. init) x0 [start, noise, noise, noise, noise, ...., end]
+    #     batch_size = len(cond[0])
+    #     horizon = self.horizon
+    #     shape = (batch_size, horizon, self.transition_dim)
+    #     x0 = torch.randn(shape).to(self.device)
+    #     x0 = apply_conditioning(x0, cond, self.action_dim)
         
-        #3. v0 구하기
-        t_batch = torch.zeros((batch_size,), device=self.device) # same with torch.full((x.shape[0],), t=0, device=x.device)
-        v0 = self.model(x0, None, t_batch) 
+    #     #3. v0 구하기
+    #     t_batch = torch.zeros((batch_size,), device=self.device) # same with torch.full((x.shape[0],), t=0, device=x.device)
+    #     v0 = self.model(x0, None, t_batch) 
 
-        #4. x1_pred 구하기
-        x1_pred = x0.clone()
-        x1_pred = x0 + v0
-        #====================================================== # 
-        # todo)
-        # 1. now is using velocitys as 0 but use x1_pred  <-  vertical to contact line
-        # 2. make CBF as Class
-        #====================================================== # 
+    #     #4. x1_pred 구하기
+    #     x1_pred = x0.clone()
+    #     x1_pred = x0 + v0
+    #     #====================================================== # 
+    #     # todo)
+    #     # 1. now is using velocitys as 0 but use x1_pred  <-  vertical to contact line
+    #     # 2. make CBF as Class
+    #     #====================================================== # 
 
 
-        t, sub_goal = self.violation_forecasting(x0, x1_pred)
-        t2, sub_goal2 = self.violation_forecasting2(x0, x1_pred)
+    #     t, sub_goal = self.violation_forecasting(x0, x1_pred)
+    #     t2, sub_goal2 = self.violation_forecasting2(x0, x1_pred)
 
-        sub_goal_list = []
-        sub_goal_list.append([0, cond[0]])
-        sub_goal_list.append([self.horizon, cond[self.horizon-1]])
-        if t != 0:
-            sub_goal_list.append([t, sub_goal])
-        if t2 != 0:
-            sub_goal_list.append([t2, sub_goal2])
-        sub_goal_list = sorted(sub_goal_list, key=lambda x: x[0])
+    #     sub_goal_list = []
+    #     sub_goal_list.append([0, cond[0]])
+    #     sub_goal_list.append([self.horizon, cond[self.horizon-1]])
+    #     if t != 0:
+    #         sub_goal_list.append([t, sub_goal])
+    #     if t2 != 0:
+    #         sub_goal_list.append([t2, sub_goal2])
+    #     sub_goal_list = sorted(sub_goal_list, key=lambda x: x[0])
 
-        cond_list = []
-        step_list = []
-        for i in range(len(sub_goal_list)-1):
-            step_temp = sub_goal_list[i+1][0] - sub_goal_list[i][0]
-            cond_temp = {}
+    #     cond_list = []
+    #     step_list = []
+    #     for i in range(len(sub_goal_list)-1):
+    #         step_temp = sub_goal_list[i+1][0] - sub_goal_list[i][0]
+    #         cond_temp = {}
 
-            cond_temp[0] = sub_goal_list[i][1]
+    #         cond_temp[0] = sub_goal_list[i][1]
 
-            cond_temp[step_temp -1] = sub_goal_list[i+1][1]
-            cond_list.append(cond_temp)
-            step_list.append(step_temp)
+    #         cond_temp[step_temp -1] = sub_goal_list[i+1][1]
+    #         cond_list.append(cond_temp)
+    #         step_list.append(step_temp)
 
-        x1_list = []
-        traj_list = []
-        for i in range(len(cond_list)):
-            print(f"task {i}/ step: {step_list[i]}, cond: {cond_list[i]}")
-            x1_temp, traj_temp = self.conditional_sample(cond=cond_list[i], *args, horizon=step_list[i], **kwargs)
-            x1_list.append(x1_temp)
-            traj_list.append(traj_temp)
+    #     x1_list = []
+    #     traj_list = []
+    #     for i in range(len(cond_list)):
+    #         print(f"task {i}/ step: {step_list[i]}, cond: {cond_list[i]}")
+    #         x1_temp, traj_temp = self.conditional_sample(cond=cond_list[i], *args, horizon=step_list[i], **kwargs)
+    #         x1_list.append(x1_temp)
+    #         traj_list.append(traj_temp)
 
-        # 궤적 시각화 함수 호출
-        visualize_trajectory(x1_list, self.action_dim,
-                            title="CBF-based trajectory planning",
-                            save_path="trajectory_segments.png")
+    #     # 궤적 시각화 함수 호출
+    #     visualize_trajectory(x1_list, self.action_dim,
+    #                         title="CBF-based trajectory planning",
+    #                         save_path="trajectory_segments.png")
 
-        # concat x1 & traj   
-        x1 = torch.cat(x1_list, dim=1)
-        traj = torch.cat(traj_list, dim=2)
-        print(x1.shape)
+    #     # concat x1 & traj   
+    #     x1 = torch.cat(x1_list, dim=1)
+    #     traj = torch.cat(traj_list, dim=2)
+    #     print(x1.shape)
         
-        return x1, traj
+    #     return x1, traj
 
 # =========== under is func for visualization ============
 def visualize_cbf_violation(x0, x0_prime, x1, cbf_vi, t_idx, action_dim, name):
