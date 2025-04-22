@@ -7,6 +7,7 @@ import torchdiffeq
 from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 from torchdyn.core import NeuralODE
 from diffuser.models import cbf
+from diffuser.models.temporal_film import TemporalFiLM
 import diffuser.utils as utils
 import pdb
 from .helpers import (
@@ -21,6 +22,7 @@ class CFM(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
+        hidden_dim=128,  # Added for temporal film
     ):
         super().__init__()
         self.horizon = horizon
@@ -28,11 +30,16 @@ class CFM(nn.Module):
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+        self.hidden_dim = hidden_dim
+
+        # Temporal FiLM layer for guidance
+        feature_dim = horizon * (observation_dim + action_dim)  # Total flattened dimension
+        self.temporal_film = TemporalFiLM(feature_dim)
 
         # CFM setting
         sigma = 0.0
         self.FM = ConditionalFlowMatcher(sigma=sigma)
-        self.node = NeuralODE(model, solver="dopri5", sensitivity="adjoint", atol=1e-4, rtol=1e-4)
+        self.node = NeuralODE(self._guided_model, solver="dopri5", sensitivity="adjoint", atol=1e-4, rtol=1e-4)
 
         # Get loss coefficients and initialize objective
         loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
@@ -46,7 +53,7 @@ class CFM(nn.Module):
         self.safe1 = 0
         self.safe2 = 0
 
-        # Settings for compatibility with diffusion models (Not important for CFM)
+        # Settings for compatibility with diffusion models
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, axis=0)
@@ -72,6 +79,24 @@ class CFM(nn.Module):
             betas * np.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         self.register_buffer('posterior_mean_coef2',
             (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod))
+
+    def _guided_model(self, t, x):
+        """
+        Wrapper for the model that applies temporal guidance through FiLM
+        Args:
+            t: time steps [batch_size]
+            x: input states [batch_size, horizon, transition_dim]
+        Returns:
+            vt: velocity prediction [batch_size, horizon, transition_dim]
+        """
+        batch_size = x.shape[0]
+        
+        x_flat = x.reshape(batch_size, -1)  # [batch_size, horizon * transition_dim]
+        x_modulated = self.temporal_film(x_flat, t)  # [batch_size, horizon * transition_dim]
+        x_reshaped = x_modulated.reshape(x.shape)  # [batch_size, horizon, transition_dim]
+        
+        vt = self.model(x_reshaped, None, t)  # [batch_size, horizon, transition_dim]
+        return vt
 
     def get_loss_weights(self, action_weight, discount, weights_dict):
         '''
@@ -122,7 +147,7 @@ class CFM(nn.Module):
         
         # 2. Compute the vector field from the conditioned state
         t_batch = torch.full((x.shape[0],), t, device=x.device)
-        vt = self.model(x_cond, None, t_batch)
+        vt = self._guided_model(t_batch, x_cond)
         
         # if self.safety_enabled and self.cbf is not None:
         #     # Flatten: x, vt are [B, H, D]
@@ -153,7 +178,7 @@ class CFM(nn.Module):
         
         # 2. Compute vector field on the conditioned state
         t_batch = torch.full((x.shape[0],), t, device=x.device)
-        vt = self.model(x_cond, None, t_batch)
+        vt = self._guided_model(t_batch, x_cond)
 
         # if self.safety_enabled and self.cbf is not None:
         #     # Flatten: x, vt are [B, H, D]
@@ -260,12 +285,13 @@ class CFM(nn.Module):
             # CBF correction
             if self.safety_enabled and self.cbf is not None:
                 x_next_naive = x_now + u_raw * (1. / self.n_timesteps)
-                x_corr, _ = self.cbf.apply(x_now, x_next_naive, t=t_now) ###### this bitch is criminal
+                x_corr, _ = self.cbf.apply(x_now, x_next_naive, t=t_now) 
                 dx = x_corr - x_now
             else:
                 dx = u_raw * (1. / self.n_timesteps)
 
-            x_next = x_now + dx
+            x_next = x_now + dx 
+            #print(f"dx : {dx}")
             x_next = apply_conditioning(x_next, cond, self.action_dim)
 
             traj.append(x_next)
@@ -277,7 +303,7 @@ class CFM(nn.Module):
             return traj_tensor[:,256,:,:]               # just sample
 
     @torch.no_grad()
-    def conditional_sample(self, cond, *args, horizon=None, record_traj=True, **kwargs):
+    def conditional_sample(self, cond, *args, horizon=None, record_traj=True, return_diffusion=False, **kwargs):
         '''
         conditions : [ (time, state), ... ]
         '''
@@ -287,9 +313,13 @@ class CFM(nn.Module):
         shape = (batch_size, horizon, self.transition_dim)
         
         if self.safety_enabled: # Planning
-            return self.p_sample_loop_ode_planning(shape, cond, record_traj=record_traj, *args, **kwargs)
+            samples = self.p_sample_loop_ode_planning(shape, cond, record_traj=record_traj, *args, **kwargs)
         else: # Training
-            return self.p_sample_loop(shape, cond, record_traj=record_traj, *args, **kwargs)
+            samples = self.p_sample_loop(shape, cond, record_traj=record_traj, *args, **kwargs)
+            
+        if return_diffusion:
+            return samples, None  # CFM doesn't have diffusion trajectory
+        return samples
 
     @property
     def device(self):
@@ -317,7 +347,7 @@ class CFM(nn.Module):
         xt = apply_conditioning(xt, cond, self.action_dim)
 
         # Compute vector field
-        vt = self.model(xt, None, t) # if there are cond, modify None -> cond
+        vt = self._guided_model(t, xt)
 
         # Compute loss
         loss, info = self.loss_fn(vt, ut)
@@ -326,7 +356,6 @@ class CFM(nn.Module):
     
     def violation_forecasting(self, x0, x1, n=2, cbf_pos_y=2, cbf_pos_x=5, cbf_r_y=2, cbf_r_x=2): #CBF wise로 받게
         # CBF 중심 좌표 추출 (두 번째 장애물 사용) - 수정된 부분
-        n=2
         off_y = 2*(cbf_pos_y-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
         off_x = 2*(cbf_pos_x-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
         pos_y = torch.full((1, self.horizon), off_y, device=self.device)
@@ -356,7 +385,7 @@ class CFM(nn.Module):
         yr = cbf_r_y*1/(self.norm_maxs[0] - self.norm_mins[0])
         xr = cbf_r_x*1/(self.norm_maxs[1] - self.norm_mins[1])
     
-        denominator = ((v_y/yr)**n + (v_x/xr)**2)**(1/n)
+        denominator = ((v_y/yr)**n + (v_x/xr)**n)**(1/n)
         r0 = (1 + 1e-2)**(1/n) / denominator
         #r0 = torch.clamp(r0, min=0.1, max=10.0)
 
@@ -547,7 +576,7 @@ def visualize_cbf_violation(x0, x0_prime, x1, cbf_vi, t_idx, action_dim, name):
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig(name + 'trajectory_and_CBF_and_cosine.png')
+    plt.savefig(name + 'trajectory_and_CBF.png')
     plt.close()
 
 def visualize_trajectory(x1_list, action_dim, title="trajectory Visualization", save_path="trajectory_visualization.png"):

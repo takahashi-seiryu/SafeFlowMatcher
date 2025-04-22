@@ -297,3 +297,23 @@ def blocks_add_deltas(env):
         return dataset
 
     return _fn
+
+def locomotion_preprocess_fn(env):
+    """
+    Preprocessing function for Halfcheetah environment.
+    Adds deltas (state differences) to the dataset.
+    """
+    def _fn(dataset):
+        # Add state differences as deltas
+        deltas = dataset['next_observations'] - dataset['observations']
+        dataset['deltas'] = deltas
+
+        # Normalize actions to [-1, 1] if needed
+        actions = dataset['actions']
+        if actions.max() > 1 or actions.min() < -1:
+            actions = np.clip(actions, -1, 1)
+            dataset['actions'] = actions
+
+        return dataset
+
+    return _fn

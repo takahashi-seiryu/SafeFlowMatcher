@@ -2,23 +2,53 @@ import torch
 from qpth.qp import QPFunction, QPSolvers
 
 class CBF:
-    def __init__(
-        self, norm_mins, norm_maxs, obstacles,
-        cbf_solver='qp', cbf_method='normal', robust_term=0.01, relax_threshold=0.9
-    ):
-        device = norm_mins.device  # make sure norms are already on device
+    # for halfcheetah
+    def __init__(self, norm_mins, norm_maxs, args):
+        self.device = norm_mins.device
         self.norm_mins = norm_mins
         self.norm_maxs = norm_maxs
-        self.obstacles = obstacles
-        self.cbf_solver = cbf_solver
-        self.robust_term = robust_term
-        self.cbf_method = cbf_method
-        self.relax_threshold = relax_threshold
-        self.device = device
+        self.horizon = args.horizon
+        self.action_dim = args.action_dim  # Halfcheetah action dimension
+        
+        self.joint_limits = {
+            'bthigh': (-0.52, 1.05),
+            'bshin': (-0.785, 0.785),
+            'bfoot': (-0.4, 0.4),
+            'fthigh': (-1, 0.7),
+            'fshin': (-0.785, 0.785),
+            'ffoot': (-0.4, 0.4),
+        }
+        
+        self.velocity_limits = {
+            'bthigh': (-5.0, 5.0),
+            'bshin': (-10.0, 10.0),
+            'bfoot': (-10.0, 10.0),
+            'fthigh': (-5.0, 5.0),
+            'fshin': (-10.0, 10.0),
+            'ffoot': (-10.0, 10.0),
+        }
+        
+        # CBF parameters
+        self.alpha = 1.0  # CBF parameter
+        self.safety_margin = 0.1  # Additional safety margin
 
-        # Precompute normalization factors
-        self.xr = 2 / (self.norm_maxs[1] - self.norm_mins[1])
-        self.yr = 2 / (self.norm_maxs[0] - self.norm_mins[0])
+    def compute_single_constraint(self, x, t=None):
+        joint_positions = x[:, :self.action_dim]
+        joint_velocities = x[:, self.action_dim:2*self.action_dim]
+        
+        # Joint position constraints
+        pos_constraints = torch.cat([
+            joint_positions - torch.tensor(list(self.joint_limits.values()), device=self.device)[:, 0],  # lower bounds
+            torch.tensor(list(self.joint_limits.values()), device=self.device)[:, 1] - joint_positions,  # upper bounds
+        ], dim=1)
+        
+        # Velocity constraints
+        vel_constraints = torch.cat([
+            joint_velocities - torch.tensor(list(self.velocity_limits.values()), device=self.device)[:, 0],
+            torch.tensor(list(self.velocity_limits.values()), device=self.device)[:, 1] - joint_velocities,
+        ], dim=1)
+        
+        return pos_constraints, vel_constraints
 
     @torch.no_grad()
     def compute_cbf_circle(self, x, center, radius):

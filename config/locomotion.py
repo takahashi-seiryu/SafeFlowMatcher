@@ -65,6 +65,45 @@ base = {
 
 halfcheetah_medium_expert_v2 = {
     'diffusion': {
-        'horizon': 16,
+        'horizon': 32,
+        'n_diffusion_steps': 100,
+    },
+}
+
+## CFM configuration
+cfm = {
+    'diffusion': {
+        ## model
+        'model': 'models.TemporalUnet',
+        'diffusion': 'models.CFM',  # Use CFM instead of GaussianDiffusion
+        'horizon': 32,
+        'n_diffusion_steps': 100,
+        'action_weight': 10,
+        'loss_weights': None,
+        'loss_discount': 1,
+        'predict_epsilon': False,
+        'dim_mults': (1, 4, 8),
+        'renderer': 'utils.MuJoCoRenderer',
+
+        ## dataset
+        'loader': 'datasets.SequenceDataset',
+        'normalizer': 'LimitsNormalizer',
+        'preprocess_fns': ['locomotion_preprocess_fn'],  # Add locomotion preprocessing
+        'clip_denoised': True,
+        'use_padding': True,
+        'max_path_length': 1000,
+
+        ## training
+        'n_steps_per_epoch': 10000,
+        'loss_type': 'l2',
+        'n_train_steps': 1e6,
+        'batch_size': 64,  # Increased batch size
+        'learning_rate': 2e-4,
+        'gradient_accumulate_every': 1,
+        'ema_decay': 0.995,
+        'save_freq': 1000,
+        'sample_freq': 1000,
+        'n_saves': 5,
+        'device': 'cuda',
     },
 }

@@ -131,8 +131,8 @@ class Trainer(object):
                 self.step_ema()
 
             if self.step % self.save_freq == 0:
-                label = self.step // self.label_freq * self.label_freq
-                self.save(label)
+                epoch = self.step // self.save_freq  # Use step number for epoch
+                self.save(epoch)
 
             if self.step % self.log_freq == 0:
                 infos_str = ' | '.join([f'{key}: {val:8.4f}' for key, val in infos.items()])
@@ -211,11 +211,13 @@ class Trainer(object):
         savepath = os.path.join(self.logdir, f'_sample-reference.png')
         self.renderer.composite(savepath, observations)
 
-
     def render_samples(self, batch_size=2, n_samples=2):
         '''
-            renders samples from (ema) diffusion model
+        renders samples from (ema) diffusion model
         '''
+        if self.renderer is None:
+            return
+
         for i in range(batch_size):
             ## get a single datapoint
             batch = self.dataloader_vis.__next__()
@@ -229,7 +231,9 @@ class Trainer(object):
             )
 
             ## [ n_samples x horizon x (action_dim + observation_dim) ]
-            samples = self.ema_model.conditional_sample(conditions, return_diffusion = False)
+            samples = self.ema_model.conditional_sample(conditions, return_diffusion=False)
+            if isinstance(samples, tuple):  # If samples is a tuple, get the first element
+                samples = samples[0]
             samples = to_np(samples)
 
             ## [ n_samples x horizon x observation_dim ]
@@ -238,10 +242,6 @@ class Trainer(object):
             # [ 1 x 1 x observation_dim ]
             normed_conditions = to_np(batch.conditions[0])[:,None]
 
-            # from diffusion.datasets.preprocessing import blocks_cumsum_quat
-            # observations = conditions + blocks_cumsum_quat(deltas)
-            # observations = conditions + deltas.cumsum(axis=1)
-
             ## [ n_samples x (horizon + 1) x observation_dim ]
             normed_observations = np.concatenate([
                 np.repeat(normed_conditions, n_samples, axis=0),
@@ -249,13 +249,11 @@ class Trainer(object):
             ], axis=1)
 
             ## [ n_samples x (horizon + 1) x observation_dim ]
-            observations = self.dataset.normalizer.unnormalize(normed_observations, 'observations')
+            observations = self.dataset.normalizer.unnormalize(
+                normed_observations,
+                'observations',
+            )
 
-            #### @TODO: remove block-stacking specific stuff
-            # from diffusion.datasets.preprocessing import blocks_euler_to_quat, blocks_add_kuka
-            # observations = blocks_add_kuka(observations)
-            ####
-
+            # paste_1.txt 방식으로 PNG로만 저장
             savepath = os.path.join(self.logdir, f'sample-{self.step}-{i}.png')
             self.renderer.composite(savepath, observations)
-            

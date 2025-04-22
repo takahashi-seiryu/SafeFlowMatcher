@@ -1,18 +1,49 @@
+from diffuser.utils import watch
 import diffuser.utils as utils
+from copy import deepcopy
+import torch
 import torch.nn as nn
 import pdb
+import os
+from diffuser.models.temporal_mlp import TemporalMLP
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
 class Parser(utils.Parser):
-    dataset: str = 'maze2d-large-v1'
-    config: str = 'config.maze2d'
+    dataset: str = 'halfcheetah-medium-expert-v2'
+    config: str = 'config.locomotion'
     method: str = 'cfm'
+
+    # Required paths
+    logbase: str = 'logs'
+    savepath: str = 'logs/halfcheetah'  # Set default savepath
+
+    # Training
+    n_train_steps: int = int(1e6)
+    n_steps_per_epoch: int = 10000
+    n_saves: int = 5
+    bucket: str = None
+    save_parallel: bool = False  # Single GPU 설정
+
+    # Model
+    n_diffusion_steps: int = 100
+    horizon: int = 32
+    n_reference: int = 8
+    n_samples: int = 8
+    hidden_dim: int = 128
+    time_embed_dim: int = 128
+    n_hidden: int = 4
+    action_weight: float = 1
+    loss_weights: str = None
+    loss_discount: float = 1
 
 args = Parser().parse_args('diffusion')
 
+# Create save directory if it doesn't exist
+if not os.path.exists(args.savepath):
+    os.makedirs(args.savepath)
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- dataset ----------------------------------#
@@ -35,25 +66,24 @@ render_config = utils.Config(
     env=args.dataset,
 )
 
-#pdb.set_trace()  #debug..................................................
 dataset = dataset_config()
 renderer = render_config()
 
 observation_dim = dataset.observation_dim
 action_dim = dataset.action_dim
 
-
 #-----------------------------------------------------------------------------#
 #------------------------------ model & trainer ------------------------------#
 #-----------------------------------------------------------------------------#
 
 model_config = utils.Config(
-    args.model,
+    TemporalMLP,
     savepath=(args.savepath, 'model_config.pkl'),
     horizon=args.horizon,
     transition_dim=observation_dim + action_dim,
-    cond_dim=observation_dim,
-    dim_mults=args.dim_mults,
+    hidden_dim=args.hidden_dim,
+    n_hidden=args.n_hidden,
+    time_embed_dim=args.time_embed_dim,
     device=args.device,
 )
 
@@ -67,10 +97,10 @@ diffusion_config = utils.Config(
     loss_type=args.loss_type,
     clip_denoised=args.clip_denoised,
     predict_epsilon=args.predict_epsilon,
-    ## loss weighting
     action_weight=args.action_weight,
     loss_weights=args.loss_weights,
     loss_discount=args.loss_discount,
+    hidden_dim=args.hidden_dim,
     device=args.device,
 )
 
@@ -96,13 +126,9 @@ trainer_config = utils.Config(
 #-------------------------------- instantiate --------------------------------#
 #-----------------------------------------------------------------------------#
 
-model = model_config()
-# model = nn.DataParallel(model_config(), device_ids=[0])
-
+model = model_config()  # Single GPU 사용
 diffusion = diffusion_config(model)
-
 trainer = trainer_config(diffusion, dataset, renderer)
-
 
 #-----------------------------------------------------------------------------#
 #------------------------ test forward & backward pass -----------------------#
@@ -116,7 +142,6 @@ loss, _ = diffusion.loss(*batch)
 loss.backward()
 print('✓')
 
-
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#
@@ -126,4 +151,3 @@ n_epochs = int(args.n_train_steps // args.n_steps_per_epoch)
 for i in range(n_epochs):
     print(f'Epoch {i} / {n_epochs} | {args.savepath}')
     trainer.train(n_train_steps=args.n_steps_per_epoch)
-

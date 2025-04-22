@@ -24,7 +24,7 @@ def env_map(env_name):
         variants for rendering
     '''
     if 'halfcheetah' in env_name:
-        return 'HalfCheetahFullObs-v2'
+        return env_name
     elif 'hopper' in env_name:
         return 'HopperFullObs-v2'
     elif 'walker2d' in env_name:
@@ -79,21 +79,36 @@ def plot2img(fig, remove_margins=True):
 #---------------------------------- renderers --------------------------------#
 #-----------------------------------------------------------------------------#
 
+class IdentityNormalizer:
+    """
+    A simple normalizer that does nothing
+    """
+    def normalize(self, x, *args, **kwargs):
+        return x
+
+    def unnormalize(self, x, *args, **kwargs):
+        return x
+
 class MuJoCoRenderer:
     '''
         default mujoco renderer
     '''
 
-    def __init__(self, env):
-        if type(env) is str:
+    def __init__(self, env, normalizer=None):
+        # 문자열을 처리하는 로직 추가
+        if isinstance(env, str):
             env = env_map(env)
             self.env = gym.make(env)
         else:
             self.env = env
+            
         ## - 1 because the envs in renderer are fully-observed
         ## @TODO : clean up
-        self.observation_dim = np.prod(self.env.observation_space.shape) - 1
+        self.observation_dim = np.prod(self.env.observation_space.shape)
         self.action_dim = np.prod(self.env.action_space.shape)
+        
+        self.normalizer = normalizer or IdentityNormalizer()
+        
         try:
             self.viewer = mjc.MjRenderContextOffscreen(self.env.sim)
         except:
@@ -120,7 +135,6 @@ class MuJoCoRenderer:
         return states
 
     def render(self, observation, dim=256, partial=False, qvel=True, render_kwargs=None, conditions=None):
-
         if type(dim) == int:
             dim = (dim, dim)
 
@@ -142,6 +156,9 @@ class MuJoCoRenderer:
             else:
                 setattr(self.viewer.cam, key, val)
 
+        # 관측값을 상태로 변환하고 필요시 정규화 해제
+        observation = self.normalizer.unnormalize(observation, 'observations')
+        
         if partial:
             state = self.pad_observation(observation)
         else:
@@ -182,7 +199,6 @@ class MuJoCoRenderer:
         return composite
 
     def composite(self, savepath, paths, dim=(1024, 256), **kwargs):
-
         render_kwargs = {
             'trackbodyid': 2,
             'distance': 10,
@@ -198,8 +214,35 @@ class MuJoCoRenderer:
         images = np.concatenate(images, axis=0)
 
         if savepath is not None:
-            imageio.imsave(savepath, images)
-            print(f'Saved {len(paths)} samples to: {savepath}')
+            # 디렉토리 생성
+            os.makedirs(os.path.dirname(os.path.abspath(savepath)), exist_ok=True)
+            
+            # 파일 확장자 확인
+            file_path, file_ext = os.path.splitext(savepath)
+            
+            # MP4 형식으로 저장할지 결정
+            if file_ext.lower() == '.mp4':
+                # 비디오로 저장
+                save_video(savepath, images)
+                print(f'Saved video to: {savepath}')
+            else:
+                # 이미지로 저장
+                if not file_ext:
+                    savepath = file_path + '.png'
+                    print(f'[ utils/rendering ] No file extension detected, using .png')
+                
+                try:
+                    imageio.imsave(savepath, images)
+                    print(f'Saved {len(paths)} samples to: {savepath}')
+                except Exception as e:
+                    print(f'[ utils/rendering ] Error saving image: {e}')
+                    # PNG 형식으로 시도
+                    try:
+                        png_path = file_path + '.png'
+                        imageio.imsave(png_path, images)
+                        print(f'[ utils/rendering ] Saved with .png format to: {png_path}')
+                    except Exception as e2:
+                        print(f'[ utils/rendering ] Failed to save with .png format: {e2}')
 
         return images
 
@@ -362,24 +405,48 @@ class MazeRenderer:
         img = plot2img(fig, remove_margins=self._remove_margins)
         return img
 
-    def composite(self, savepath, paths, ncol=5, **kwargs):
-        '''
-            savepath : str
-            observations : [ n_paths x horizon x 2 ]
-        '''
-        assert len(paths) % ncol == 0, 'Number of paths must be divisible by number of columns'
-
+    def composite(self, savepath, paths, dim=(1024, 256), **kwargs):
+        render_kwargs = {
+            'trackbodyid': 2,
+            'distance': 10,
+            'lookat': [5, 2, 0.5],
+            'elevation': 0
+        }
         images = []
-        for path, kw in zipkw(paths, **kwargs):
-            img = self.renders(*path, **kw)
+        for path in paths:
+            ## [ H x obs_dim ]
+            path = atmost_2d(path)
+            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs)
             images.append(img)
-        images = np.stack(images, axis=0)
+        images = np.concatenate(images, axis=0)
 
-        nrow = len(images) // ncol
-        images = einops.rearrange(images,
-            '(nrow ncol) H W C -> (nrow H) (ncol W) C', nrow=nrow, ncol=ncol)
-        imageio.imsave(savepath, images)
-        print(f'Saved {len(paths)} samples to: {savepath}')
+        if savepath is not None:
+            # 디렉토리 생성
+            os.makedirs(os.path.dirname(os.path.abspath(savepath)), exist_ok=True)
+            
+            # 파일 확장자 확인
+            file_path, file_ext = os.path.splitext(savepath)
+            
+            # 확장자가 없는 경우 .png 추가
+            if not file_ext:
+                savepath = file_path + '.png'
+                print(f'[ utils/rendering ] No file extension detected, using .png')
+            
+            # 이미지 저장
+            try:
+                imageio.imsave(savepath, images)
+                print(f'Saved {len(paths)} samples to: {savepath}')
+            except Exception as e:
+                print(f'[ utils/rendering ] Error saving image: {e}')
+                # PNG 형식으로 시도
+                try:
+                    png_path = file_path + '.png'
+                    imageio.imsave(png_path, images)
+                    print(f'[ utils/rendering ] Saved with .png format to: {png_path}')
+                except Exception as e2:
+                    print(f'[ utils/rendering ] Failed to save with .png format: {e2}')
+
+        return images
 
     
     def render_diffusion(self, savepath, diffusion_path, **video_kwargs):
