@@ -87,7 +87,7 @@ for iter in range(10):
     # renderer.composite(fullpath, samples.observations, ncol=1)
     renderer.composite(fullpath, samples.observations)  
 
-    for t in range(3000):
+    for t in range(diffusion.max_episode_steps):
         state = env.state_vector().copy()
         
         if t < len(samples.actions[0]):
@@ -113,6 +113,7 @@ for iter in range(10):
             renderer.composite(os.path.join(args.savepath, 'rollout.png'), np.array(rollout)[None])
         
         if terminal:
+            print("terminated")
             break
 
         observation = next_observation
@@ -126,6 +127,7 @@ for iter in range(10):
     
     mp4_path = os.path.join(args.savepath, f'rollout_{iter}.mp4')
     print(f'Saving rollout to {mp4_path}')
+    print(f"[DEBUG] Total frames to save: {len(frames)}")
     imageio.mimsave(mp4_path, frames, fps=20)
 
 print('='*50)
