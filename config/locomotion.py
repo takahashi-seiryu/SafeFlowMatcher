@@ -107,3 +107,25 @@ cfm = {
         'device': 'cuda',
     },
 }
+
+hopper_medium_v2 = {
+    'diffusion': {
+        'horizon': 32,
+        'n_diffusion_steps': 100,
+        'preprocess_fns': ['locomotion_preprocess_fn'],
+    },
+}
+
+hopper_cfm = {
+    'diffusion': {
+        'model': 'models.TemporalUnet',
+        'diffusion': 'models.CFM',
+        'horizon': 32,
+        'n_diffusion_steps': 100,
+        'action_weight': 10,
+        'preprocess_fns': ['locomotion_preprocess_fn'],
+        'batch_size': 64,
+        'learning_rate': 2e-4,
+        'gradient_accumulate_every': 1,
+    },
+}

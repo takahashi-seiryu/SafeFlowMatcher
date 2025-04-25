@@ -203,13 +203,15 @@ class MuJoCoRenderer:
             'trackbodyid': 2,
             'distance': 10,
             'lookat': [5, 2, 0.5],
-            'elevation': 0
+            'elevation': 0,
         }
         images = []
         for path in paths:
             ## [ H x obs_dim ]
             path = atmost_2d(path)
-            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs)
+            # Remove partial, qvel, and render_kwargs from kwargs if they exist
+            kwargs_filtered = {k: v for k, v in kwargs.items() if k not in ['partial', 'qvel', 'render_kwargs']}
+            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs_filtered)
             images.append(img)
         images = np.concatenate(images, axis=0)
 
@@ -416,7 +418,9 @@ class MazeRenderer:
         for path in paths:
             ## [ H x obs_dim ]
             path = atmost_2d(path)
-            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs)
+            # Remove partial, qvel, and render_kwargs from kwargs if they exist
+            kwargs_filtered = {k: v for k, v in kwargs.items() if k not in ['partial', 'qvel', 'render_kwargs']}
+            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs_filtered)
             images.append(img)
         images = np.concatenate(images, axis=0)
 

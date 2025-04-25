@@ -11,6 +11,55 @@ import diffuser.utils as utils
 Trajectories = namedtuple('Trajectories', 'actions observations')
 # GuidedTrajectories = namedtuple('GuidedTrajectories', 'actions observations value')
 
+class PolicyWithoutCBF:
+    def __init__(self, diffusion_model, normalizer, args):
+        self.diffusion_model = diffusion_model
+        self.normalizer = normalizer
+        self.action_dim = normalizer.action_dim
+        
+        # CBF 기능 비활성화
+        self.diffusion_model.safety_enabled = False
+
+    @property
+    def device(self):
+        parameters = list(self.diffusion_model.parameters())
+        return parameters[0].device
+
+    def _format_conditions(self, conditions, batch_size):
+        conditions = utils.apply_dict(
+            self.normalizer.normalize,
+            conditions,
+            'observations',
+        )
+        conditions = utils.to_torch(conditions, dtype=torch.float32, device='cuda:0')
+        conditions = utils.apply_dict(
+            einops.repeat,
+            conditions,
+            'd -> repeat d', repeat=batch_size,
+        )
+        return conditions
+
+    def __call__(self, conditions, debug=False, batch_size=1):
+        conditions = self._format_conditions(conditions, batch_size)
+        sample, diffusion = self.diffusion_model(conditions)
+        
+        sample = utils.to_np(sample)
+        diffusion = utils.to_np(diffusion)
+
+        actions = sample[:, :, :self.action_dim]
+        actions = self.normalizer.unnormalize(actions, 'actions')
+
+        action = actions[0, 0]
+
+        normed_observations = sample[:, :, self.action_dim:]
+        observations = self.normalizer.unnormalize(normed_observations, 'observations')
+
+        normed_diffusion = diffusion[:,:,:,self.action_dim:]
+        diffusions = self.normalizer.unnormalize(normed_diffusion, 'observations')
+
+        trajectories = Trajectories(actions, observations)
+        return action, trajectories, diffusions
+
 class Policy:
 
     def __init__(self, diffusion_model, normalizer, args):
@@ -28,9 +77,9 @@ class Policy:
         robust_term = args.robust_term
         relax_threshold = args.relax_threshold
 
-        self.diffusion_model.safety_enabled = True
-        self.diffusion_model.cbf = CBF(norm_mins, norm_maxs, obstacles, cbf_solver, \
-                                       cbf_method, robust_term, relax_threshold)
+        # self.diffusion_model.safety_enabled = True
+        # self.diffusion_model.cbf = CBF(norm_mins, norm_maxs, obstacles, cbf_solver, \
+        #                                cbf_method, robust_term, relax_threshold)
 
     @property
     def device(self):
