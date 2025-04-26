@@ -96,8 +96,8 @@ trainer_config = utils.Config(
 #-------------------------------- instantiate --------------------------------#
 #-----------------------------------------------------------------------------#
 
-#model = model_config()
-model = nn.DataParallel(model_config(), device_ids=[0])
+model = model_config()
+#model = nn.DataParallel(model_config(), device_ids=[0])
 
 diffusion = diffusion_config(model)
 
@@ -109,7 +109,7 @@ trainer = trainer_config(diffusion, dataset, renderer)
 #-----------------------------------------------------------------------------#
 
 utils.report_parameters(model)
-
+#pdb.set_trace()  #debug..................................................
 print('Testing forward...', end=' ', flush=True)
 batch = utils.batchify(dataset[0])
 loss, _ = diffusion.loss(*batch)

@@ -84,7 +84,14 @@ class CBF:
         # No equality constraints
         e = torch.empty(0, device=self.device)
 
-        out = QPFunction(verbose=-1, solver=QPSolvers.PDIPM_BATCHED)(Q, q, G, h, e, e)
+        out = QPFunction(
+            eps=1e-12,                       # Tolerance (convergence criterion)
+            verbose=0,                       # Output level (-1: off, 0: summary, 1: detailed)
+            notImprovedLim=10,                # Allowed number of iterations without improvement
+            maxIter=20,                      # Maximum number of iterations
+            solver=QPSolvers.PDIPM_BATCHED,  # Solver to use
+            check_Q_spd=True                 # Whether to check if Q is SPD (Symmetric Positive Definite)
+        )(Q, q, G, h, e, e)
         return out
 
     def solve_closed_form(self, u_ref, G, h, method='robust'):

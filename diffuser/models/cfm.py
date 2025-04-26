@@ -280,64 +280,66 @@ class CFM(nn.Module):
         
         return loss, info
 
-    # def forward(self, cond, *args, **kwargs):
-    #     return self.conditional_sample(cond=cond, *args, **kwargs)
-
+    # wthout segementing
     def forward(self, cond, *args, **kwargs):
-        batch_size = len(cond[0])
-        horizon = self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
-        
-        # 1. Initialize noisy trajectory with boundary condition
-        x0 = torch.randn(shape).to(self.device)
-        x0 = apply_conditioning(x0, cond, self.action_dim)
-        
-        # 2. Predict velocity
-        t_batch = torch.zeros((batch_size,), device=self.device)
-        v0 = self.model(x0, None, t_batch) 
+        return self.conditional_sample(cond=cond, *args, **kwargs)
 
-        # 3. Predict trajectory via 1-step Euler
-        x1_pred = x0.clone()
-        x1_pred = x0 + v0
+    # with segmenting
+    # def forward(self, cond, *args, **kwargs):
+    #     batch_size = len(cond[0])
+    #     horizon = self.horizon
+    #     shape = (batch_size, horizon, self.transition_dim)
         
-        # 4. Forecast violation
-        t_list, sub_goal_list = self.cbf.forecast_violation(x0, x1_pred)
+    #     # 1. Initialize noisy trajectory with boundary condition
+    #     x0 = torch.randn(shape).to(self.device)
+    #     x0 = apply_conditioning(x0, cond, self.action_dim)
         
-        # 5. Add start & end goals
-        sub_goal_pairs = [[0, cond[0]]]
-        for t, g in zip(t_list, sub_goal_list):
-            if t != 0:
-                sub_goal_pairs.append([t, g])
-        sub_goal_pairs.append([horizon, cond[horizon - 1]])
-        sub_goal_pairs = sorted(sub_goal_pairs, key=lambda x: x[0])
+    #     # 2. Predict velocity
+    #     t_batch = torch.zeros((batch_size,), device=self.device)
+    #     v0 = self.model(x0, None, t_batch) 
 
-        # 6. Build condition sets per segment
-        cond_list = []
-        step_list = []
-        for i in range(len(sub_goal_pairs) - 1):
-            t0, g0 = sub_goal_pairs[i]
-            t1, g1 = sub_goal_pairs[i + 1]
-            steps = t1 - t0
-            step_list.append(steps)
-            cond_list.append({0: g0, steps - 1: g1})
+    #     # 3. Predict trajectory via 1-step Euler
+    #     x1_pred = x0.clone()
+    #     x1_pred = x0 + v0
         
-        # 7. Plan each segment
-        x1_list = []
-        traj_list = []
-        for i in range(len(cond_list)):
-            print(f"task {i}/ step: {step_list[i]}, cond: {cond_list[i]}")
-            x1_temp, traj_temp = self.conditional_sample(cond=cond_list[i], *args, horizon=step_list[i], **kwargs)
-            x1_list.append(x1_temp)
-            traj_list.append(traj_temp)
-
-        visualize_trajectory(x1_list, self.action_dim,
-                            title="CBF-based trajectory planning",
-                            save_path="logs/trajectory_segments.png")
-
-        x1 = torch.cat(x1_list, dim=1)
-        traj = torch.cat(traj_list, dim=2)
+    #     # 4. Forecast violation
+    #     t_list, sub_goal_list = self.cbf.forecast_violation(x0, x1_pred)
         
-        return x1, traj
+    #     # 5. Add start & end goals
+    #     sub_goal_pairs = [[0, cond[0]]]
+    #     for t, g in zip(t_list, sub_goal_list):
+    #         if t != 0:
+    #             sub_goal_pairs.append([t, g])
+    #     sub_goal_pairs.append([horizon, cond[horizon - 1]])
+    #     sub_goal_pairs = sorted(sub_goal_pairs, key=lambda x: x[0])
+
+    #     # 6. Build condition sets per segment
+    #     cond_list = []
+    #     step_list = []
+    #     for i in range(len(sub_goal_pairs) - 1):
+    #         t0, g0 = sub_goal_pairs[i]
+    #         t1, g1 = sub_goal_pairs[i + 1]
+    #         steps = t1 - t0
+    #         step_list.append(steps)
+    #         cond_list.append({0: g0, steps - 1: g1})
+        
+    #     # 7. Plan each segment
+    #     x1_list = []
+    #     traj_list = []
+    #     for i in range(len(cond_list)):
+    #         print(f"task {i}/ step: {step_list[i]}, cond: {cond_list[i]}")
+    #         x1_temp, traj_temp = self.conditional_sample(cond=cond_list[i], *args, horizon=step_list[i], **kwargs)
+    #         x1_list.append(x1_temp)
+    #         traj_list.append(traj_temp)
+
+    #     visualize_trajectory(x1_list, self.action_dim,
+    #                         title="CBF-based trajectory planning",
+    #                         save_path="logs/trajectory_segments.png")
+
+    #     x1 = torch.cat(x1_list, dim=1)
+    #     traj = torch.cat(traj_list, dim=2)
+        
+    #     return x1, traj
 
 # =========== under is func for visualization ============
 def visualize_trajectory(x1_list, action_dim, title="trajectory Visualization", save_path="trajectory_visualization.png"):
