@@ -74,7 +74,7 @@ base = {
         'n_train_steps': 1e6,
         'batch_size': 32,
         'learning_rate': 2e-4,
-        'gradient_accumulate_every': 2,
+        'gradient_accumulate_every': 1,
         'ema_decay': 0.995,
         'save_freq': 20000,
         'sample_freq': 20000,
@@ -88,7 +88,7 @@ base = {
 
     'values': {
         'model': 'models.ValueFunction',
-        'diffusion': 'models.ValueDiffusion',
+        # 'diffusion': 'models.ValueDiffusion',
         'horizon': 600,
         'n_diffusion_steps': 20,
         'dim_mults': (1, 2, 4, 8),
@@ -117,7 +117,7 @@ base = {
         'n_train_steps': 200e3,
         'batch_size': 32,
         'learning_rate': 2e-4,
-        'gradient_accumulate_every': 2,
+        'gradient_accumulate_every': 1,
         'ema_decay': 0.995,
         'save_freq': 1000,
         'sample_freq': 0,
@@ -178,8 +178,8 @@ cfm = {
         ## model
         'model': 'models.TemporalUnet', # TemporalUnet, ConditionalUnet1D (Not implemented yet)
         'diffusion': 'models.CFM',
-        'horizon': 256,
-        'n_diffusion_steps': 256,
+        'horizon': 600,
+        'n_diffusion_steps': 20,
         'action_weight': 1,
         'loss_weights': None,
         'loss_discount': 1,
@@ -202,10 +202,10 @@ cfm = {
         'exp_name': watch(diffusion_args_to_watch),
 
         ## training
-        'n_steps_per_epoch': 25000,#10000
+        'n_steps_per_epoch': 10000,#25000
         'loss_type': 'l2',
-        'n_train_steps': 5e5, #2e6
-        'batch_size': 256,  # prev is 32
+        'n_train_steps': 2e6, #5e5
+        'batch_size': 512,  # prev is 32
         'learning_rate': 2e-4, # prev is 2e-4
         'gradient_accumulate_every': 1,
         'ema_decay': 0.995,
@@ -219,28 +219,96 @@ cfm = {
         'device': 'cuda',
     },
 
-    'plan': {
-        'batch_size': 1,
-        'device': 'cuda',
 
-        ## cfm model
+    'values': {
+        'model': 'models.TemporalValue',
+        'diffusion': 'models.ValueDiffusion',
+        'horizon': 600,
+        'n_diffusion_steps': 20,
+        'dim_mults': (1, 2, 4, 8),
+        'renderer': 'utils.MuJoCoRenderer',
+
+        ## value-specific kwargs
+        'discount': 0.99,
+        'termination_penalty': -100,
+        'normed': False,
+
+        ## dataset
+        'loader': 'datasets.ValueDataset',
+        'normalizer': 'LimitsNormalizer',
+        'preprocess_fns': [],
+        'use_padding': True,
+        'max_path_length': 1000,
+
+        ## serialization
+        'logbase': logbase,
+        'prefix': 'values/defaults',
+        'exp_name': watch(args_to_watch),
+
+        ## training
+        'n_steps_per_epoch': 10000,
+        'loss_type': 'value_l2',
+        'n_train_steps': 200e3,
+        'batch_size': 32,
+        'learning_rate': 2e-4,
+        'gradient_accumulate_every': 1,
+        'ema_decay': 0.995,
+        'save_freq': 1000,
+        'sample_freq': 0,
+        'n_saves': 5,
+        'save_parallel': False,
+        'n_reference': 8,
+        'bucket': None,
+        'device': 'cuda',
+        'seed': 42,
+    },
+
+    'plan': {
+        ## planning policy
+        # 'guide': 'sampling.ValueGuide',
+        'policy': 'sampling.Policy',
+        'device': 'cuda',
+        'seed': 42,
+
+        ## episode config
+        'max_episode_length': 1000,  
+
+        ## guide sampling params
+        'n_guide_steps': 2,
+        'scale': 0.1,
+        't_stopgrad': 2,
+        'scale_grad_by_std': True,
+
+        ## diffusion model
         'horizon': 256,
         'n_diffusion_steps': 256,
         'normalizer': 'LimitsNormalizer',
 
-        ## serialization
-        'vis_freq': 10,
-        'logbase': 'logs',
+        ## value function
+        'discount': 0.99,
+
+        ## data preprocessing (optional)
+        'preprocess_fns': [],
+
+        ## logging & save
+        'logbase': logbase,
         'prefix': 'plans/release',
         'exp_name': watch(plan_args_to_watch),
+        'vis_freq': 10,
+        'max_render': 8,
         'suffix': '58',
 
-        'conditional': False,
-
-        ## loading
+        ## model loading
         'diffusion_loadpath': 'f:cfm/H{horizon}_T{n_diffusion_steps}',
+        'value_loadpath': 'f:values/defaults_H{horizon}_T{n_diffusion_steps}_d{discount}',
+
         'diffusion_epoch': 'latest',
-    },
+        'value_epoch': 'latest',
+
+        ## flags
+        'verbose': True,
+        'conditional': False,
+    }
 
 }
 
@@ -252,6 +320,7 @@ hopper_medium_expert_v2 = {
         'scale': 0.001,
         't_stopgrad': 4,
     },
+
 }
 
 

@@ -9,7 +9,6 @@ from diffuser.datasets.preprocessing import get_policy_preprocess_fn
 
 Trajectories = namedtuple('Trajectories', 'actions observations values')
 
-
 class GuidedPolicy:
 
     def __init__(self, guide, diffusion_model, normalizer, preprocess_fns, **sample_kwargs):

@@ -13,9 +13,11 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 class Parser(utils.Parser):
     # dataset: str = 'walker2d-medium-replay-v2'
-    dataset: str = 'hopper_medium_expert_v2'
+    dataset: str = 'hopper-medium-expert-v2'
     config: str = 'config.locomotion'
     method: str = 'cfm'
+    loadbase: str = 'logs'
+
 
 args = Parser().parse_args('plan')
 
@@ -24,14 +26,10 @@ args.batch_size = 1
 #---------------------------------- loading ----------------------------------#
 #-----------------------------------------------------------------------------#
 
-## load diffusion model and value function from disk
+## load diffusion model from disk
 diffusion_experiment = utils.load_diffusion(
     args.loadbase, args.dataset, args.diffusion_loadpath,
     epoch=args.diffusion_epoch, seed=args.seed,
-)
-value_experiment = utils.load_diffusion(
-    args.loadbase, args.dataset, args.value_loadpath,
-    epoch=args.value_epoch, seed=args.seed,
 )
 
 diffusion = diffusion_experiment.ema
@@ -47,9 +45,9 @@ renderer = diffusion_experiment.renderer
 
 
 ## initialize value guide
-value_function = value_experiment.ema
-guide_config = utils.Config(args.guide, model=value_function, verbose=False)
-guide = guide_config()
+# value_function = value_experiment.ema
+# guide_config = utils.Config(args.guide, model=value_function, verbose=False)
+# guide = guide_config()
 
 logger_config = utils.Config(
     utils.Logger,
@@ -64,7 +62,7 @@ logger_config = utils.Config(
 ## policies are wrappers around an unconditional diffusion model and a value guide
 policy_config = utils.Config(
     args.policy,
-    guide=guide,
+    # guide=guide,
     scale=args.scale,
     diffusion_model=diffusion,
     normalizer=dataset.normalizer,

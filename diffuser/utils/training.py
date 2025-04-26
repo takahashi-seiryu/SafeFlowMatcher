@@ -56,28 +56,35 @@ class Trainer(object):
         super().__init__()
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
-        # Create a new instance with the same architecture
-        self.ema_model = type(self.model)(
-            model=self.model.model,
-            horizon=self.model.horizon,
-            observation_dim=self.model.observation_dim,
-            action_dim=self.model.action_dim,
-            n_timesteps=self.model.n_timesteps,
-            loss_type=getattr(self.model, 'loss_type', 'l2'),
-            clip_denoised=getattr(self.model, 'clip_denoised', True),
-            predict_epsilon=getattr(self.model, 'predict_epsilon', False),
-            action_weight=getattr(self.model, 'action_weight', 1.0),
-            loss_discount=getattr(self.model, 'loss_discount', 1.0),
-            loss_weights=getattr(self.model, 'loss_weights', None),
-        )
-        self.ema_model.load_state_dict(self.model.state_dict())
+        # Create a new instance of the model with same parameters
+        # model_params = {
+        #     'model': diffusion_model.model,
+        #     'horizon': diffusion_model.horizon,
+        #     'observation_dim': diffusion_model.observation_dim,
+        #     'action_dim': diffusion_model.action_dim,
+        #     'hidden_dim': diffusion_model.hidden_dim,
+        #     'n_timesteps': diffusion_model.n_timesteps,
+        # }
+        model_params = {
+            'model': diffusion_model.model,
+            'horizon': diffusion_model.horizon,
+            'observation_dim': diffusion_model.observation_dim,
+            'action_dim': diffusion_model.action_dim,
+            'n_timesteps': diffusion_model.n_timesteps,
+        }
+
+        self.ema_model = diffusion_model.__class__(**model_params)
+        self.ema_model.loss_fn = copy.deepcopy(diffusion_model.loss_fn)  # 이 한 줄 추가
+        self.ema_model.load_state_dict(diffusion_model.state_dict())
+        # Move EMA model to the same device as the original model
+        self.ema_model = self.ema_model.to(next(diffusion_model.parameters()).device)
         self.update_ema_every = update_ema_every
 
         self.step_start_ema = step_start_ema
         self.log_freq = log_freq
         self.sample_freq = sample_freq
         self.save_freq = save_freq
-        self.label_freq = label_freq
+        self.label_freq = label_freq    
         self.save_parallel = save_parallel
 
         self.batch_size = train_batch_size

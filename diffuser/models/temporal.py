@@ -147,7 +147,11 @@ class TemporalValue(nn.Module):
     ):
         super().__init__()
 
-        dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
+        if time_dim is None:
+            time_dim = dim
+        # dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
+        dims = [transition_dim + time_dim, *map(lambda m: dim * m, dim_mults)]
+
         in_out = list(zip(dims[:-1], dims[1:]))
 
         time_dim = time_dim or dim
@@ -162,16 +166,19 @@ class TemporalValue(nn.Module):
 
         print(in_out)
         for dim_in, dim_out in in_out:
-
             self.blocks.append(nn.ModuleList([
                 ResidualTemporalBlock(dim_in, dim_out, kernel_size=5, embed_dim=time_dim, horizon=horizon),
                 ResidualTemporalBlock(dim_out, dim_out, kernel_size=5, embed_dim=time_dim, horizon=horizon),
                 Downsample1d(dim_out)
             ]))
+            horizon = horizon // 2  # *** Horizon 업데이트 
 
-            horizon = horizon // 2
+        self.final_horizon = max(horizon, 1)  # 수정
+        fc_dim = dims[-1] * self.final_horizon  # 수정
+        mid_dim = dims[-1]
+        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
 
-        fc_dim = dims[-1] * max(horizon, 1)
 
         self.final_block = nn.Sequential(
             nn.Linear(fc_dim + time_dim, fc_dim // 2),
@@ -179,13 +186,26 @@ class TemporalValue(nn.Module):
             nn.Linear(fc_dim // 2, out_dim),
         )
 
+    # def forward(self, x, cond, time, *args):
+    #     '''
+    #         x : [ batch x horizon x transition ]
+    #     '''
+
+    #     x = einops.rearrange(x, 'b h t -> b t h')
+
+    #     t = self.time_mlp(time)
+
+    #     for resnet, resnet2, downsample in self.blocks:
+    #         x = resnet(x, t)
+    #         x = resnet2(x, t)
+    #         x = downsample(x)
+
+    #     x = x.view(len(x), -1)
+    #     out = self.final_block(torch.cat([x, t], dim=-1))
+    #     return out
+
     def forward(self, x, cond, time, *args):
-        '''
-            x : [ batch x horizon x transition ]
-        '''
-
         x = einops.rearrange(x, 'b h t -> b t h')
-
         t = self.time_mlp(time)
 
         for resnet, resnet2, downsample in self.blocks:
@@ -193,6 +213,11 @@ class TemporalValue(nn.Module):
             x = resnet2(x, t)
             x = downsample(x)
 
+        x = self.mid_block1(x, t)
+        x = self.mid_block2(x, t)
+
         x = x.view(len(x), -1)
         out = self.final_block(torch.cat([x, t], dim=-1))
         return out
+
+

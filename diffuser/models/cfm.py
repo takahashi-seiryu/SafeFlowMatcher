@@ -7,6 +7,8 @@ import torchdiffeq
 from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 from torchdyn.core import NeuralODE
 from diffuser.models import cbf
+from diffuser.models.temporal_film import TemporalFiLM
+
 import diffuser.utils as utils
 import pdb
 from .helpers import (
@@ -21,6 +23,7 @@ class CFM(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
+        hidden_dim=128,  # Added for temporal film
     ):
         super().__init__()
         self.horizon = horizon
@@ -28,6 +31,12 @@ class CFM(nn.Module):
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+
+        self.hidden_dim = hidden_dim
+
+        # Temporal FiLM layer for guidance
+        feature_dim = horizon * (observation_dim + action_dim)  # Total flattened dimension
+        self.temporal_film = TemporalFiLM(feature_dim)
 
         # CFM setting
         sigma = 0.0
