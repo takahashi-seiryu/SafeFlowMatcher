@@ -75,7 +75,7 @@ class Trainer(object):
 
         self.ema_model = diffusion_model.__class__(**model_params)
         self.ema_model.loss_fn = copy.deepcopy(diffusion_model.loss_fn)  # 이 한 줄 추가
-        self.ema_model.load_state_dict(diffusion_model.state_dict())
+        self.ema_model.load_state_dict(diffusion_model.state_dict(), strict=False)
         # Move EMA model to the same device as the original model
         self.ema_model = self.ema_model.to(next(diffusion_model.parameters()).device)
         self.update_ema_every = update_ema_every
@@ -108,7 +108,7 @@ class Trainer(object):
         self.step = 0
 
     def reset_parameters(self):
-        self.ema_model.load_state_dict(self.model.state_dict())
+        self.ema_model.load_state_dict(self.model.state_dict(), strict=False)
 
     def step_ema(self):
         if self.step < self.step_start_ema:
@@ -145,9 +145,9 @@ class Trainer(object):
             if self.step % self.log_freq == 0:
                 infos_str = ' | '.join([f'{key}: {val:8.4f}' for key, val in infos.items()])
                 print(f'{self.step}: {loss:8.4f} | {infos_str} | t: {timer():8.4f}', flush=True)
-
-            if self.step == 0 and self.sample_freq:
-                self.render_reference(self.n_reference)
+            #pdb.set_trace()
+            #if self.step == 0 and self.sample_freq:
+            #    self.render_reference(self.n_reference) # freeze here. i don't know why
 
             if self.sample_freq and self.step % self.sample_freq == 0:
                 self.render_samples()

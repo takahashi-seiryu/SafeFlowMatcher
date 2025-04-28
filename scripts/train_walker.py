@@ -12,7 +12,7 @@ class Parser(utils.Parser):
     config: str = 'config.locomotion'
     method: str = 'cfm'
 
-args = Parser().parse_args('diffusion')
+args = Parser().parse_args('plan')
 
 
 #-----------------------------------------------------------------------------#

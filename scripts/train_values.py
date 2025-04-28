@@ -56,7 +56,7 @@ model_config = utils.Config(
     args.model,
     savepath=(args.savepath, 'model_config.pkl'),
     horizon=args.horizon,
-    transition_dim=observation_dim + action_dim,
+    transition_dim=observation_dim + action_dim,  # 실제 데이터 차원에 맞춤
     cond_dim=observation_dim,
     dim_mults=args.dim_mults,
     device=args.device,
@@ -113,36 +113,18 @@ print(f"[디버그] dataset[0] trajectories shape: {dataset[0].trajectories.shap
 
 print('Testing forward...', end=' ', flush=True)
 
-batch = utils.batchify(dataset[0])
+data = dataset[0]
 
-transition_dim = diffusion.transition_dim
-action_dim = diffusion.action_dim
-
-# trajectories
-if batch[0].ndim == 2:
-    trajectories = batch[0].unsqueeze(0)
-else:
-    trajectories = batch[0]
-
-# conditions
-if isinstance(batch[1], dict):
-    conditions = {
-        k: torch.as_tensor(v).unsqueeze(0)
-        for k, v in batch[1].items()
-    }
-else:
-    raise ValueError("batch[1] must be a dict!")
-
-# target
-target = torch.as_tensor(batch[2]).unsqueeze(0)
+device = next(diffusion.parameters()).device  # Get the device of the model
+trajectories = torch.as_tensor(data.trajectories).unsqueeze(0).to(device)  # (1, 600, 14)
+conditions = {k: torch.as_tensor(v).unsqueeze(0).to(device) for k, v in data.conditions.items()}  # dict
+target = torch.as_tensor(data.values).unsqueeze(0).to(device)  # (1, 1)
 
 batch = (trajectories, conditions, target)
-
 
 loss, _ = diffusion.loss(*batch)
 loss.backward()
 print('✓')
-
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#

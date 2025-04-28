@@ -844,6 +844,10 @@ class GaussianDiffusion(nn.Module):
     def loss(self, x, *args):
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
+        
+        self.sqrt_alphas_cumprod = self.sqrt_alphas_cumprod.to(x.device)
+        self.sqrt_one_minus_alphas_cumprod = self.sqrt_one_minus_alphas_cumprod.to(x.device)
+
         return self.p_losses(x, *args, t)
 
     def forward(self, cond, *args, **kwargs):

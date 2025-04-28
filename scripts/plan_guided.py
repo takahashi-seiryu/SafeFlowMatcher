@@ -67,6 +67,7 @@ policy_config = utils.Config(
     diffusion_model=diffusion,
     normalizer=dataset.normalizer,
     preprocess_fns=args.preprocess_fns,
+    args=args
     ## sampling kwargs
     sample_fn=sampling.n_step_guided_p_sample,
     n_guide_steps=args.n_guide_steps,

@@ -51,6 +51,7 @@ class Logger:
             self.renderer.render_diffusion_samp_c(
                 os.path.join(self.savepath, f'diffusion.mp4'),
                 diffusion,
+                step=t,
                 fps = 200,
             )
         import pdb;

@@ -299,7 +299,7 @@ class MuJoCoRenderer:
 
         # save_video(savepath, frames, **video_kwargs)
     
-    def render_diffusion_samp_c(self, savepath, diffusion_path, **video_kwargs):
+    def render_diffusion_samp_c(self, savepath, diffusion_path, step=0, **video_kwargs):
         '''
             diffusion_path : [batch_size x n_diffusion_steps x horizon x joined_dim ]
         '''
@@ -324,9 +324,9 @@ class MuJoCoRenderer:
 
             frame = []
             if t==n_diffusion_steps-1:
-                img = self.composite(None, states_l, dim=(1024, 256), saveframes = True, readframes = False)
+                img = self.composite(os.path.join(savepath, f'{step}_{t}.png'), states_l, dim=(1024, 256), saveframes = True, readframes = False)
             else:
-                img = self.composite(None, states_l, dim=(1024, 256), saveframes = False, readframes = False)
+                img = self.composite(os.path.join(savepath, f'{step}_{t}.png'), states_l, dim=(1024, 256), saveframes = False, readframes = False)
             frame.append(img)
             frame = np.concatenate(frame, axis=0)
             for ii in range(20):  # compensate x10

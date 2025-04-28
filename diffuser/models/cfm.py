@@ -7,8 +7,9 @@ import torchdiffeq
 from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 from torchdyn.core import NeuralODE
 from diffuser.models import cbf
-from diffuser.models.temporal_film import TemporalFiLM
-
+from diffuser.models.temporal_film import TemporalFiLM   # delete this!!!!
+from diffuser.sampling.guides import ValueGuide
+from diffuser.models.guidance_matcher import GuidanceMatcher
 import diffuser.utils as utils
 import pdb
 from .helpers import (
@@ -24,6 +25,7 @@ class CFM(nn.Module):
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
         hidden_dim=128,  # Added for temporal film
+        
     ):
         super().__init__()
         self.horizon = horizon
@@ -34,7 +36,7 @@ class CFM(nn.Module):
 
         self.hidden_dim = hidden_dim
 
-        # Temporal FiLM layer for guidance
+        # Temporal FiLM layer for guidance   @@@delete
         feature_dim = horizon * (observation_dim + action_dim)  # Total flattened dimension
         self.temporal_film = TemporalFiLM(feature_dim)
 
@@ -68,6 +70,13 @@ class CFM(nn.Module):
         self.clip_denoised = clip_denoised
         self.predict_epsilon = predict_epsilon
 
+        # 리워드 가이딩 관련 속성 추가
+        self.guidance_enabled = False
+        self.guidance_matcher = None
+        self.value_guide = None
+        self.guidance_scale = 1.0
+
+        # only for diffusion
         self.register_buffer('betas', betas)
         self.register_buffer('alphas_cumprod', alphas_cumprod)
         self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
@@ -134,7 +143,7 @@ class CFM(nn.Module):
         
         # 2. Compute the vector field from the conditioned state
         t_batch = torch.full((x.shape[0],), t, device=x.device)
-        vt = self.model(x_cond, None, t_batch)
+        vt = self._guided_model(t_batch, x_cond)
 
         return vt
 
@@ -148,7 +157,46 @@ class CFM(nn.Module):
         
         # 2. Compute vector field on the conditioned state
         t_batch = torch.full((x.shape[0],), t, device=x.device)
-        vt = self.model(x_cond, None, t_batch)
+        vt = self._guided_model(t_batch, x_cond)
+        
+        return vt
+
+    def enable_guidance(self, value_model, guidance_type='direct', scale=1.0):
+        """
+        리워드 가이딩을 활성화하는 메서드
+        
+        Args:
+            value_model: 가치 함수 모델
+            guidance_type: 가이딩 방법 ('direct', 'use_learned_v', 'rw')
+            scale: 가이딩 스케일
+        """
+        
+        self.guidance_enabled = True
+        self.value_guide = ValueGuide(value_model)
+        self.guidance_matcher = GuidanceMatcher(
+            model=self.model,
+            action_dim=self.action_dim,
+            scale=scale,
+            guidance_type=guidance_type
+        )
+        self.guidance_scale = scale
+
+    def _guided_model(self, t, x):
+        """
+        가이딩을 적용한 모델 호출 메서드
+        """
+        # 기본 벡터 필드 계산
+        vt = self.model(x, None, t)  # [batch_size, horizon, transition_dim]
+        # 리워드 가이딩 적용
+        if self.guidance_enabled and self.value_guide is not None:
+            # 가치 함수 계산
+            x = x.detach().requires_grad_()
+            with torch.enable_grad():
+                x1_pred = x + (1-t)*vt
+                values, grad_v = self.value_guide.gradients(x1_pred, None, t)
+            
+            # 가이딩 적용
+            vt = self.guidance_matcher.apply_guidance(x, vt, grad_v, None, t, values.unsqueeze(-1))
         
         return vt
 
@@ -162,7 +210,7 @@ class CFM(nn.Module):
         
         # Apply condition to initial state
         x0 = apply_conditioning(x0, cond, self.action_dim)
-
+        #pdb.set_trace()
         # Wrapper function for torchdiffeq.odeint (must accept only t and x as arguments)
         if record_traj:
             trajectory_list = []
@@ -263,6 +311,7 @@ class CFM(nn.Module):
             return self.p_sample_loop_ode_planning(shape, cond, record_traj=record_traj, *args, **kwargs)
         else: # Training
             return self.p_sample_loop(shape, cond, record_traj=record_traj, *args, **kwargs)
+
 
     @property
     def device(self):

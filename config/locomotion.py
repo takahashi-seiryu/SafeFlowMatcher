@@ -180,11 +180,12 @@ cfm = {
         'diffusion': 'models.CFM',
         'horizon': 600,
         'n_diffusion_steps': 20,
-        'action_weight': 1,
+        'action_weight': 10,
         'loss_weights': None,
         'loss_discount': 1,
         'predict_epsilon': False,
-        'dim_mults': (1, 4, 8),
+        'dim_mults': (1, 2, 4, 8),
+        'attention': False,
         'renderer': 'utils.MuJoCoRenderer',
 
         ## dataset
@@ -192,9 +193,9 @@ cfm = {
         'termination_penalty': None,
         'normalizer': 'LimitsNormalizer',
         'preprocess_fns': [],
-        'clip_denoised': True,
-        'use_padding': False,
-        'max_path_length': 40000,
+        'clip_denoised': False,
+        'use_padding': True,
+        'max_path_length': 1000,
 
         ## serialization
         'logbase': 'logs',
@@ -221,11 +222,14 @@ cfm = {
 
 
     'values': {
-        'model': 'models.TemporalValue',
+        'model': 'models.ValueFunction',
         'diffusion': 'models.ValueDiffusion',
         'horizon': 600,
         'n_diffusion_steps': 20,
         'dim_mults': (1, 2, 4, 8),
+        #'observation_dim': 43,  # 추가
+        #'action_dim': 3,         # 추가
+        #'transition_dim': 46,    # 추가
         'renderer': 'utils.MuJoCoRenderer',
 
         ## value-specific kwargs
@@ -246,10 +250,10 @@ cfm = {
         'exp_name': watch(args_to_watch),
 
         ## training
-        'n_steps_per_epoch': 10000,
+        'n_steps_per_epoch': 1250, #10000
         'loss_type': 'value_l2',
-        'n_train_steps': 200e3,
-        'batch_size': 32,
+        'n_train_steps': 25e3, #200e3
+        'batch_size': 512, #32
         'learning_rate': 2e-4,
         'gradient_accumulate_every': 1,
         'ema_decay': 0.995,
@@ -260,15 +264,15 @@ cfm = {
         'n_reference': 8,
         'bucket': None,
         'device': 'cuda',
-        'seed': 42,
+        'seed': 42, #why not None?
     },
 
     'plan': {
         ## planning policy
-        # 'guide': 'sampling.ValueGuide',
-        'policy': 'sampling.Policy',
+        'guide': 'sampling.ValueGuide',
+        'policy': 'sampling.GuidedPolicy',
         'device': 'cuda',
-        'seed': 42,
+        'seed': 42, #why None isn;t work?
 
         ## episode config
         'max_episode_length': 1000,  
@@ -280,8 +284,8 @@ cfm = {
         'scale_grad_by_std': True,
 
         ## diffusion model
-        'horizon': 256,
-        'n_diffusion_steps': 256,
+        'horizon': 600,
+        'n_diffusion_steps': 20,
         'normalizer': 'LimitsNormalizer',
 
         ## value function
@@ -320,7 +324,11 @@ hopper_medium_expert_v2 = {
         'scale': 0.001,
         't_stopgrad': 4,
     },
-
+    'values': {
+        'observation_dim': 11,
+        'action_dim': 3,
+        'transition_dim': 46,
+    },
 }
 
 
