@@ -123,7 +123,6 @@ class Policy:
         # observations = np.concatenate([observation_np[:,None], next_observations], axis=1)
 
         trajectories = Trajectories(actions, observations)
-        # return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo
-        return action, trajectories, diffusions, sum_elbo
+        return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo
         # else:
         #     return action

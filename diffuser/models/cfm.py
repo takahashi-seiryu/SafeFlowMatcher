@@ -224,10 +224,13 @@ class CFM(nn.Module):
             # CBF correction
             if self.safety_enabled and self.cbf is not None:
                 x_next_naive = x_now + u_raw * (1. / self.n_timesteps)
-                x_corr, _ = self.cbf.apply(x_now, x_next_naive, t=t_now)
+                x_corr, safe_val = self.cbf.apply(x_now, x_next_naive, t=t_now)
                 dx = x_corr - x_now
             else:
                 dx = u_raw * (1. / self.n_timesteps)
+
+            self.safe1 = safe_val[0]
+            self.safe2 = safe_val[1]
 
             x_next = x_now + dx
             x_next = apply_conditioning(x_next, cond, self.action_dim)
