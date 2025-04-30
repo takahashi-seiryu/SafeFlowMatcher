@@ -92,15 +92,15 @@ class CBF:
         s.t. G u ≤ h
         """
         if method in ['robust', 'time']:
-            q = -u_ref[:, 2:4]      # [B, 2]: desired move -(Δx, Δy)
+            q = -2 * u_ref[:, 2:4]      # [B, 2]: desired move -(Δx, Δy)
 
-            Q = torch.eye(2, device=self.device).unsqueeze(0).expand(u_ref.size(0), 2, 2)
+            Q = 2 * torch.eye(2, device=self.device).unsqueeze(0).expand(u_ref.size(0), 2, 2)
         elif method == 'relax':
             q_u = -u_ref[:, 2:4]      # [B, 2]: desired move -(Δx, Δy)
             q_r = torch.zeros_like(q_u[:, :1])  # [B, 2]
-            q = torch.cat([q_u, q_r], dim=1)       # [B, 3]
+            q = 2 * torch.cat([q_u, q_r], dim=1)       # [B, 3]
 
-            Q = torch.eye(3, device=self.device).unsqueeze(0).expand(u_ref.size(0), 3, 3)
+            Q = 2 * torch.eye(3, device=self.device).unsqueeze(0).expand(u_ref.size(0), 3, 3)
         else:
             raise ValueError(f"Unknown method {method}")
                 
