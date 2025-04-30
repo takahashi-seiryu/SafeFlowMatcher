@@ -6,7 +6,8 @@ from torch import nn
 import torchdiffeq
 from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 from torchdyn.core import NeuralODE
-from diffuser.models import cbf
+from flow_matching.solver import ODESolver
+from torch.distributions.normal import Normal
 import diffuser.utils as utils
 import pdb
 from .helpers import (
@@ -16,6 +17,15 @@ from .helpers import (
     Losses,
 )
 
+# For NLL
+class SimpleWrapper(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model  # expects model(x, cond, t)
+
+    def forward(self, x, t):
+        t_batch = torch.full((x.shape[0],), t, device=x.device)
+        return self.model(x, None, t_batch)
 
 class CFM(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
@@ -351,6 +361,84 @@ class CFM(nn.Module):
     #     traj = torch.cat(traj_list, dim=2)
         
     #     return x1, traj
+
+    # ------------------------------------------ NLL calculation ------------------------------------------#
+    def compute_nll(self, x1, num_steps, exact_div=False):
+        device = self.device
+        x1 = x1.to(device)
+        B, H, D = x1.shape
+
+        # prior log-probability
+        def log_p0(x: torch.Tensor) -> torch.Tensor:
+            return Normal(0.0, 1.0).log_prob(x).sum(dim=(1, 2))   # [B]
+
+        # pre-sample Hutchinson Rademacher noise
+        if not exact_div:
+            z = (torch.randint_like(x1, low=0, high=2) * 2 - 1).to(device)  # ±1
+
+        # ODE system
+        def dynamics(t, states):
+            x_t, log_det = states                                # xt:[B,H,D] , log_det:[B]
+            x_t = x_t.requires_grad_(True)
+
+            # velocity field v_t(x)
+            t_batch = torch.full((B,), t.item(), device=device)
+            ut = self.model(x_t, None, t_batch)                  # [B,H,D]
+
+            # divergence -- exact or Hutchinson
+            if exact_div:
+                div = torch.zeros(B, device=device)
+                # trace of Jacobian
+                for idx in range(ut.flatten(1).shape[1]):
+                    div += torch.autograd.grad(
+                        ut.flatten(1)[:, idx].sum(), x_t,
+                        create_graph=False, retain_graph=True
+                    )[0].flatten(1)[:, idx]
+            else:
+                dot = (ut * z).sum()                            # scalar
+                grad = torch.autograd.grad(dot, x_t, create_graph=False, retain_graph=True)[0]
+                div = (grad * z).flatten(1).sum(dim=1)          # [B]
+
+            return (ut, div)                                    # x_dot = u , l_dot = div(v_t)
+
+        # integrate backward  t:1 -> 0
+        # t_grid = torch.linspace(1.0, 0.0, num_steps + 1, device=device)  # uniform scheduling
+        t_grid = self.adaptive_scheduling(num_steps, 1.0, device=device)  # adaptive scheduling
+        y0 = (x1, torch.zeros(B, device=device))
+
+        sol_x, sol_log = torchdiffeq.odeint(
+            dynamics,
+            y0,
+            t_grid,
+            method='euler',  # 'euler', 'rk4', 'dopri5'
+            atol=1e-5,
+            rtol=1e-5
+        )
+
+        x0      = sol_x[-1]                  # latent sample at t = 0
+        log_det = sol_log[-1]                # ∫ div(v_t) dt   (sign handled by time grid)
+
+        # final log-prob & NLL
+        log_px1 = log_p0(x0) + log_det       # log p(x1)
+        nll     = -log_px1.mean()            # averaged over batch
+
+        return x0, nll
+    
+    def adaptive_scheduling(num_steps, lmbd=1.0, device=None):
+        N = num_steps
+        # 1) dt_i = (2λ)/(N(N+1))*(N-(i-1)) + (1-λ)/N
+        steps = [
+            (2*lmbd) / (N*(N+1)) * (N - (i-1)) + (1 - lmbd) / N
+            for i in range(1, N+1)
+        ]
+        # 2) t_0=1.0, t_i = t_{i-1} - dt_i
+        t = 1.0
+        t_grid = [t]
+        for dt in steps:
+            t = t - dt
+            t_grid.append(t)
+
+        return torch.tensor(t_grid, device=device)
 
 # =========== under is func for visualization ============
 def visualize_trajectory(x1_list, action_dim, title="trajectory Visualization", save_path="trajectory_visualization.png"):

@@ -61,7 +61,7 @@ class Policy:
         self.diffusion_model.norm_maxs = self.normalizer.normalizers['observations'].maxs
         sample, diffusion = self.diffusion_model(conditions)
 
-        #if get elbo/NLL####################################################for elbo/NLL
+        #if get elbo/NLL (diffuser) ####################################################for elbo/NLL
         # import pickle
         # with open('./diffuser.pkl', 'rb') as f:  # load a data from diffuser as a baseline
         #     data = pickle.load(f)
@@ -76,7 +76,10 @@ class Policy:
         #     sum_elbo = sum_elbo + elboi
         #     elbo.append(elboi)
         # sum_elbo = sum_elbo.detach().cpu().numpy()[0]/255  #ave
-        #else#####################################################################
+        #elif get NLL (flow matcher)#####################################################################
+        # _, nll = self.diffusion_model.compute_nll(sample, num_steps=200, exact_div=False)
+        # sum_elbo = nll.item()
+        #else ##########################################################################################
         sum_elbo = 0
         #end#########################################################################
 
