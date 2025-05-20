@@ -201,10 +201,11 @@ maze2d_large_v1 = {
         'n_diffusion_steps': 256,  # 256 debug
 
         # Safety enabled
-        'safety_enabled': True,  # True, False
+        'safety_enabled': True,  # True, False 
+        # (If you want to use naive FM, you also need to change conditional_sample in cfm.py)
 
         # One Shot Initialization
-        'one_shot_enabled': True,  # True, False
+        'one_shot_enabled': False,  # True, False
 
         ## CBF
         'obstacles': [
@@ -214,6 +215,6 @@ maze2d_large_v1 = {
         'cbf_solver': 'qp',   # 'qp', 'closed_form'
         'cbf_method': 'relax', # 'robust', 'relax', 'time'
         'robust_term': 0.01,  # 0.01, 0.1
-        'relax_threshold': 0.90,
+        'relax_threshold': 0.9999,
     },
 }

@@ -59,32 +59,38 @@ class Policy:
         ## run reverse diffusion process
         self.diffusion_model.norm_mins = self.normalizer.normalizers['observations'].mins
         self.diffusion_model.norm_maxs = self.normalizer.normalizers['observations'].maxs
-        sample, diffusion = self.diffusion_model(conditions)
+        output = self.diffusion_model(conditions)
+        if len(output) == 2:
+            sample, diffusion = output
+        elif len(output) == 3:
+            sample, diffusion, _ = output
+        else:
+            raise ValueError("Unexpected number of outputs from diffusion_model")
 
         #calc trap1 trap2####################################################
-        trap1, trap2 = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
+        # trap1, trap2 = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
         
 
         #if get elbo/NLL (diffuser) ####################################################for elbo/NLL
-        import pickle
-        with open('./diffuser.pkl', 'rb') as f:  # load a data from diffuser as a baseline
-            data = pickle.load(f)
-        diffuser_state = torch.tensor(data['gt']).float().to(self.device) 
-        f.close()
-        diff_num = diffusion.shape[1]
-        elbo = []
-        sum_elbo = 0
-        for step in range(0, diff_num-2, 1):
-            timesteps = torch.full((batch_size,), diff_num-2 - step, device=self.device, dtype=torch.long)
-            elboi = self.diffusion_model._vb_terms_bpd(diffuser_state, conditions, diffusion[:,step,:,:], timesteps)
-            sum_elbo = sum_elbo + elboi
-            elbo.append(elboi)
-        sum_elbo = sum_elbo.detach().cpu().numpy()[0]/255  #ave
+        # import pickle
+        # with open('./diffuser.pkl', 'rb') as f:  # load a data from diffuser as a baseline
+        #     data = pickle.load(f)
+        # diffuser_state = torch.tensor(data['gt']).float().to(self.device) 
+        # f.close()
+        # diff_num = diffusion.shape[1]
+        # elbo = []
+        # sum_elbo = 0
+        # for step in range(0, diff_num-2, 1):
+        #     timesteps = torch.full((batch_size,), diff_num-2 - step, device=self.device, dtype=torch.long)
+        #     elboi = self.diffusion_model._vb_terms_bpd(diffuser_state, conditions, diffusion[:,step,:,:], timesteps)
+        #     sum_elbo = sum_elbo + elboi
+        #     elbo.append(elboi)
+        # sum_elbo = sum_elbo.detach().cpu().numpy()[0]/255  #ave
         #elif get NLL (flow matcher)#####################################################################
         # _, nll = self.diffusion_model.compute_nll(sample, num_steps=200, exact_div=False)
         # sum_elbo = nll.item()
         #else ##########################################################################################
-        # sum_elbo = 0
+        sum_elbo = 0
         #end#########################################################################
 
 
@@ -130,6 +136,7 @@ class Policy:
         # observations = np.concatenate([observation_np[:,None], next_observations], axis=1)
 
         trajectories = Trajectories(actions, observations)
-        return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo, trap1, trap2
+        # return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo, trap1, trap2
+        return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo
         # else:
         #     return action
