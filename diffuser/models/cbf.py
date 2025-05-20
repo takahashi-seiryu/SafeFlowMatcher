@@ -1,4 +1,5 @@
 import torch
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -17,7 +18,7 @@ class CBF:
         
         # Parameters for CBF
         self.alpha = 0.5
-        self.rho = 1
+        self.rho = 0.9
 
         self.robust_term = args.robust_term
         self.relax_threshold = args.relax_threshold
@@ -57,11 +58,13 @@ class CBF:
             h = alpha * finite_time_term
 
         elif self.cbf_method == 'relax':
-            sign = 10.0 if (t is not None and t <= self.relax_threshold) else 0.0
-            # if t <= self.relax_threshold:
-            #     sign = 1.0 * (1 - t / self.relax_threshold)
-            # else:
-            #     sign = 0.0
+            # sign = 30.0 if (t is not None and t <= self.relax_threshold) else 0.0
+
+            if t <= self.relax_threshold:
+                ratio = t / self.relax_threshold
+                sign = 100.0 * (1 - math.exp(3 * (ratio - 1)))  # exp drop near t=relax_threshold
+            else:
+                sign = 0.0
 
             rx = sign * torch.ones_like(L1)
             G = torch.cat([-L1, -L2, rx], dim=1).unsqueeze(1)
