@@ -55,7 +55,7 @@ safe1_batch, safe2_batch = [], []
 score_batch = []
 comp_time = []
 elbo_batch = []
-trap1_batch, trap2_batch = 0, 0
+# trap1_batch, trap2_batch = 0, 0
 success = 0
 import time
 for iter in range(1):   # num of testing runs
@@ -89,7 +89,8 @@ for iter in range(1):   # num of testing runs
 
             cond[0] = observation
             start = time.time()
-            action, samples, diffusion_paths, safe1, safe2, elbo, trap1, trap2 = policy(cond, batch_size=args.batch_size)
+            # action, samples, diffusion_paths, safe1, safe2, elbo, trap1, trap2 = policy(cond, batch_size=args.batch_size)
+            action, samples, diffusion_paths, safe1, safe2, elbo = policy(cond, batch_size=args.batch_size)
             # action, samples, diffusion_paths, elbo = policy(cond, batch_size=args.batch_size)
             end = time.time()
             comp_time.append(end-start)
@@ -191,15 +192,15 @@ for iter in range(1):   # num of testing runs
         success = success + 1
 
     # score = 0
-    if trap1 == True:
-        trap1_batch += 1
-    if trap2 == True:
-        trap2_batch += 1
+    # if trap1 == True:
+    #     trap1_batch += 1
+    # if trap2 == True:
+    #     trap2_batch += 1
 
-    # safe1_batch.append(torch.cat([torch.tensor([safe1]), torch.tensor([score])], dim = 0))
-    # safe2_batch.append(torch.cat([torch.tensor([safe2]), torch.tensor([score])], dim = 0))
-    safe1_batch.append(torch.cat([safe1[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe1.device)], dim = 1))
-    safe2_batch.append(torch.cat([safe2[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe2.device)], dim = 1))
+    safe1_batch.append(torch.cat([torch.tensor([safe1]), torch.tensor([score])], dim = 0))
+    safe2_batch.append(torch.cat([torch.tensor([safe2]), torch.tensor([score])], dim = 0))
+    # safe1_batch.append(torch.cat([safe1[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe1.device)], dim = 1))
+    # safe2_batch.append(torch.cat([safe2[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe2.device)], dim = 1))
     score_batch.append(score)
     # logger.finish(t, env.max_episode_steps, score=score, value=0)
     print(safe1_batch)
@@ -218,8 +219,8 @@ safe2_batch = torch.stack(safe2_batch, dim=0)
 comp_time = np.array(comp_time)
 print("safe1: ", torch.min(safe1_batch[:,0]).cpu().numpy())
 print("safe2: ", torch.min(safe2_batch[:,0]).cpu().numpy())
-print("trap1: ", trap1_batch)
-print("trap2: ", trap2_batch)
+# print("trap1: ", trap1_batch)
+# print("trap2: ", trap2_batch)
 print("score mean: ", np.mean(score_batch))
 print("score std: ", np.std(score_batch))
 print("computation time: ", np.mean(comp_time))
