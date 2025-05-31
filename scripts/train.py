@@ -1,6 +1,15 @@
+import sys
+import os
+
+# ziwon 경로 제거
+sys.path = [p for p in sys.path if 'ziwon' not in p]
+
+sys.path.insert(0, '/home/work/CBF-CFM/safe_cfm')
+
 import diffuser.utils as utils
 import torch.nn as nn
 import pdb
+
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#

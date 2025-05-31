@@ -129,10 +129,10 @@ cfm = {
         'exp_name': watch(diffusion_args_to_watch),
 
         ## training
-        'n_steps_per_epoch': 5000,#10000
+        'n_steps_per_epoch': 25000,#10000
         'loss_type': 'l2',
-        'n_train_steps': 1e6, #2e6
-        'batch_size': 64,  # prev is 32
+        'n_train_steps': 5e5, #2e6
+        'batch_size': 256,  # prev is 32
         'learning_rate': 2e-4, # prev is 2e-4
         'gradient_accumulate_every': 1,
         'ema_decay': 0.995,
@@ -201,7 +201,7 @@ maze2d_large_v1 = {
         'n_diffusion_steps': 256,  # 256 debug
 
         # Safety enabled
-        'safety_enabled': False,  # True, False
+        'safety_enabled': True,  # True, False
 
         # One Shot Initialization
         'one_shot_enabled': True,  # True, False

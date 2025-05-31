@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import torch
 from torch import nn
 import pdb
@@ -1114,12 +1115,12 @@ class GaussianDiffusion(nn.Module):
             # x = self.GD(x, xp1)
 
             ####################### SafeDiffusers 
-            x = self.invariance(x, xp1)    # RoS
+            # x = self.invariance(x, xp1)    # RoS
             # x = self.invariance_cf(x, xp1)  # RoS closed form
             # x = self.invariance_relax(x, xp1, t) # ReS
             # x = self.invariance_relax_cf(x, xp1, t)   #ReS closed form    
             # x = self.invariance_time(x, xp1, t)   # TVS
-            # x = self.invariance_time_cf(x, xp1, t)  # TVS closed form
+            x = self.invariance_time_cf(x, xp1, t)  # TVS closed form
             # x = self.invariance_relax_narrow(x, xp1, t)  # narrow passage case
 
             ####################### Applying SafeDiffusers to only the last 10 steps
@@ -1162,7 +1163,9 @@ class GaussianDiffusion(nn.Module):
 
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         safe1, safe2 = [], []
+        iter_time = 0
         for i in reversed(range(0, self.n_timesteps)):  #-50 change here for the number of diffusion steps,
+            iter_start = time.time()
             if i < 0:
                 i = 0
             timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
@@ -1173,6 +1176,8 @@ class GaussianDiffusion(nn.Module):
             progress.update({'t': i})
 
             if return_diffusion: diffusion.append(x)
+            iter_end = time.time()
+            iter_time += (iter_end - iter_start)
         
         self.safe1 = torch.cat(safe1, dim=0)
         self.safe2 = torch.cat(safe2, dim=0)
@@ -1180,7 +1185,7 @@ class GaussianDiffusion(nn.Module):
         progress.close()
         # pdb.set_trace()
         if return_diffusion:
-            return x, torch.stack(diffusion, dim=1)
+            return x, torch.stack(diffusion, dim=1), [iter_time/self.n_timesteps]
         else:
             return x
 

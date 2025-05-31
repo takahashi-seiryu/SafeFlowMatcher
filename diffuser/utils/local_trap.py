@@ -11,6 +11,7 @@ def local_trap(traj_tensor, cbf, batch_idx=0, n_timesteps=256):
         batch_idx: 사용할 배치 인덱스
         n_timesteps: 사용할 호라이즌 인덱스 (기본값 256)
     """
+    n_timesteps=256  #<------ fix this
     # 특정 배치와 호라이즌에 대한 트래젝토리 추출
     traj = traj_tensor[batch_idx, n_timesteps, :, 2:4]
     # 연속된 상태 간 거리 계산
@@ -22,7 +23,7 @@ def local_trap(traj_tensor, cbf, batch_idx=0, n_timesteps=256):
     distances_long = []
     for i in range(0, traj.shape[0]):
         if i == 0 or i == traj.shape[0]-1:
-            dist = 1
+            dist = 0
         else:
             dist = min(distances[i-1], distances[i])
         distances_long.append(dist)
@@ -56,17 +57,16 @@ def local_trap(traj_tensor, cbf, batch_idx=0, n_timesteps=256):
     cbf_values_array = np.array(all_cbf_values)  # 형태: [장애물 수, 시간 단계 수]
     min_cbf_values = np.min(cbf_values_array, axis=0)  # 형태: [시간 단계 수]
 
-    dist_thr = 0.04
-    cbf_thr = 0.01
+    dist_thr = 0.1
+    cbf_thr = 0.05
     num_of_trap = 0
     for i in range(traj.shape[0]):
         #if num_of_trap > 1:
         #    break
-        print("i: ", i)
         if distances_long[i] > dist_thr and min_cbf_values[i] < cbf_thr:
-            print(f"trapped: {i}/ distance: {distances_long[i]}, cbf: {min_cbf_values[i]}")
+            #print(f"trapped: {i}/ distance: {distances_long[i]}, cbf: {min_cbf_values[i]}")
             num_of_trap += 1
-
+    print(f"num of trap: {num_of_trap}")
     if num_of_trap == 0:
         trap1 = False
         trap2 = False

@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import csv
 from os.path import join
 import pdb
 import os
@@ -50,6 +51,15 @@ def smooth(diffusion):
     
     return diffusion_copy
 
+# --------------------------------- csv header ----------------------------------#
+# 결과를 저장할 CSV 파일 열기
+csv_path = join(args.savepath, 'results.csv')
+os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+if not os.path.exists(csv_path):
+    with open(csv_path, 'w', newline='') as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(['iter', 'safe1', 'safe2', 'trap1', 'trap2', 'score', 'itertime', 'success'])
+
 #---------------------------------- main loop ----------------------------------#
 safe1_batch, safe2_batch = [], []
 score_batch = []
@@ -57,9 +67,11 @@ comp_time = []
 elbo_batch = []
 trap1_batch, trap2_batch = 0, 0
 success = 0
+iter_time_batch = []
 import time
+test_num = 1
 for iter in range(1):   # num of testing runs
-    print("step: ", iter, "/100")
+    print("step: ", iter, f"/{test_num}")
 
     observation = env.reset()    #array([ 0.94875744,  8.93648809, -0.01347715,  0.06358764])
     observation = np.array([ 0.94875744,  2.93648809, -0.01347715,  0.06358764])   # fix the initial position and final destination for comparison (not needed for general testing)
@@ -89,7 +101,7 @@ for iter in range(1):   # num of testing runs
 
             cond[0] = observation
             start = time.time()
-            action, samples, diffusion_paths, safe1, safe2, elbo, trap1, trap2 = policy(cond, batch_size=args.batch_size)
+            action, samples, diffusion_paths, safe1, safe2, elbo, trap1, trap2, iter_time = policy(cond, batch_size=args.batch_size)
             # action, samples, diffusion_paths, elbo = policy(cond, batch_size=args.batch_size)
             end = time.time()
             comp_time.append(end-start)
@@ -103,10 +115,10 @@ for iter in range(1):   # num of testing runs
             diffusion_paths = diffusion_paths[0]
 
             
-            ##################################################save videos/images
+            #################################################save videos/images
             fullpath = join(args.savepath, f'{iter}.png')
             renderer.composite(fullpath, samples.observations, ncol=1)
-            #########################################s################# 8/3/2023
+            # #########################################s################# 8/3/2023
             # diffusion_sm = smooth(diffusion_paths)    # smooth the generated traj.
             diffusion_sm = diffusion_paths            # do not smooth the generated traj.
             renderer.render_diffusion(join(args.savepath, f'diffusion.mp4'), diffusion_sm)
@@ -198,13 +210,37 @@ for iter in range(1):   # num of testing runs
 
     # safe1_batch.append(torch.cat([torch.tensor([safe1]), torch.tensor([score])], dim = 0))
     # safe2_batch.append(torch.cat([torch.tensor([safe2]), torch.tensor([score])], dim = 0))
-    safe1_batch.append(torch.cat([safe1[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe1.device)], dim = 1))
-    safe2_batch.append(torch.cat([safe2[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe2.device)], dim = 1))
+    # safe1_batch.append(torch.cat([safe1[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe1.device)], dim = 1))
+    # safe2_batch.append(torch.cat([safe2[-1].unsqueeze(0).unsqueeze(0), torch.tensor(score).unsqueeze(0).unsqueeze(0).to(safe2.device)], dim = 1))
     score_batch.append(score)
+    iter_time_batch.append(iter_time)
     # logger.finish(t, env.max_episode_steps, score=score, value=0)
-    print(safe1_batch)
-    print(safe2_batch)
-    print(score_batch)
+
+    # per-iter 통계 계산
+    # safe1_val    = safe1[-1].item()
+    # safe2_val    = safe2[-1].item()
+    trap1_val    = int(trap1)
+    trap2_val    = int(trap2)
+    score_val    = float(score)
+    itertime_val = float(iter_time[0])
+    success_val  = 1 if reward > 0.95 else 0
+
+    # 3) append 모드로 CSV에 한 줄 쓰기
+    with open(csv_path, 'a', newline='') as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow([
+            iter,
+            #safe1_val,
+            #safe2_val,
+            trap1_val,
+            trap2_val,
+            score_val,
+            itertime_val,
+            success_val
+        ])
+
+iter_time_batch = np.array(iter_time_batch)
+iter_time_avg = np.mean(iter_time_batch, axis=0).tolist()
 
 # pdb.set_trace()
 print("======================results======================")
@@ -213,16 +249,19 @@ print("elbo mean: ", np.mean(elbo_batch))
 print("elbo std: ", np.std(elbo_batch))
 
 score_batch = np.array(score_batch)
-safe1_batch = torch.stack(safe1_batch, dim=0)
-safe2_batch = torch.stack(safe2_batch, dim=0)
+#safe1_batch = torch.stack(safe1_batch, dim=0)
+#safe2_batch = torch.stack(safe2_batch, dim=0)
 comp_time = np.array(comp_time)
-print("safe1: ", torch.min(safe1_batch[:,0]).cpu().numpy())
-print("safe2: ", torch.min(safe2_batch[:,0]).cpu().numpy())
+#print("safe1: ", torch.min(safe1_batch[:,0]).cpu().numpy())
+#print("safe2: ", torch.min(safe2_batch[:,0]).cpu().numpy())
 print("trap1: ", trap1_batch)
 print("trap2: ", trap2_batch)
 print("score mean: ", np.mean(score_batch))
 print("score std: ", np.std(score_batch))
 print("computation time: ", np.mean(comp_time))
+print("iter time: ", iter_time_avg[0])
+if len(iter_time_avg) == 2:
+    print("OSI time: ", iter_time_avg[1])
 print("success rate: ", success)
 print("=======================end=========================")
 
