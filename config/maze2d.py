@@ -26,7 +26,6 @@ plan_args_to_watch = [
     ##
     ('conditional', 'cond'),
 ]
-
 base = {
 
     'diffusion': {
@@ -129,15 +128,15 @@ cfm = {
         'exp_name': watch(diffusion_args_to_watch),
 
         ## training
-        'n_steps_per_epoch': 25000,#10000
+        'n_steps_per_epoch': 5000, # base: 10000
         'loss_type': 'l2',
-        'n_train_steps': 5e5, #2e6
-        'batch_size': 256,  # prev is 32
-        'learning_rate': 2e-4, # prev is 2e-4
-        'gradient_accumulate_every': 1,
+        'n_train_steps': 1e6, # base: 2e6
+        'batch_size': 64,     # base: 32
+        'learning_rate': 2e-4,
+        'gradient_accumulate_every': 1, # base: 2
         'ema_decay': 0.995,
-        'save_freq': 1000, # 1000
-        'sample_freq': 5000, # prev is 1000
+        'save_freq': 50000,
+        'sample_freq': 50000,
         'n_saves': 50,
         'save_parallel': False,
         'n_reference': 50,
