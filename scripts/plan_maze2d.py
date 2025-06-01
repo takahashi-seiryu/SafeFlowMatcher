@@ -71,7 +71,7 @@ num_success = 0
 iter_time_batch = []
 test_num = 1
 
-TOTAL_TEST_RUN = 2
+TOTAL_TEST_RUN = 1
 for iter in range(TOTAL_TEST_RUN):   # num of testing runs
     print("step: ", iter, f"/{test_num}")
 
@@ -114,21 +114,21 @@ for iter in range(TOTAL_TEST_RUN):   # num of testing runs
             diffusion_paths = diffusion_paths[0]
             
             ##################################################start saving videos/images
-            # # Save the composite image of all trajectories
-            # fullpath = join(args.savepath, f'{iter}.png')
-            # renderer.composite(fullpath, samples.observations, ncol=1)
+            # Save the composite image of all trajectories
+            fullpath = join(args.savepath, f'{iter}.png')
+            renderer.composite(fullpath, samples.observations, ncol=1)
 
-            # # Save the diffusion process as a video
-            # # diffusion_sm = smooth(diffusion_paths)  # smooth the generated traj.
-            # diffusion_sm = diffusion_paths            # do not smooth the generated traj.
-            # renderer.render_diffusion(join(args.savepath, f'diffusion.mp4'), diffusion_sm)
+            # Save the diffusion process as a video
+            # diffusion_sm = smooth(diffusion_paths)  # smooth the generated traj.
+            diffusion_sm = diffusion_paths            # do not smooth the generated traj.
+            renderer.render_diffusion(join(args.savepath, f'diffusion.mp4'), diffusion_sm)
 
-            # # Save individual frames of the diffusion process
-            # diff_step = diffusion_sm.shape[0]  
-            # makedirs(join(args.savepath, 'png'))
-            # for kk in range(diff_step):
-            #     imgpath = join(args.savepath, f'png/{kk}.png')
-            #     renderer.composite(imgpath, diffusion_sm[kk:kk+1], ncol=1)
+            # Save individual frames of the diffusion process
+            diff_step = diffusion_sm.shape[0]  
+            makedirs(join(args.savepath, 'png'))
+            for kk in range(diff_step):
+                imgpath = join(args.savepath, f'png/{kk}.png')
+                renderer.composite(imgpath, diffusion_sm[kk:kk+1], ncol=1)
             ##################################################end saving videos/images
 
         ##################################################start planning

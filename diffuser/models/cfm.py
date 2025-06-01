@@ -381,83 +381,46 @@ class CFM(nn.Module):
     #     return x1, traj
 
     # ------------------------------------------ NLL calculation ------------------------------------------#
-    def compute_nll(self, x1, num_steps, exact_div=False):
+    def compute_nll(self, x1, num_steps=200):
         device = self.device
         x1 = x1.to(device)
         B, H, D = x1.shape
 
-        # prior log-probability
-        def log_p0(x: torch.Tensor) -> torch.Tensor:
-            return Normal(0.0, 1.0).log_prob(x).sum(dim=(1, 2))   # [B]
+        def log_p0(x):
+            return Normal(0.0, 1.0).log_prob(x).sum(dim=(1, 2))  # [B]
 
-        # pre-sample Hutchinson Rademacher noise
-        if not exact_div:
-            z = (torch.randint_like(x1, low=0, high=2) * 2 - 1).to(device)  # ±1
+        z = (torch.randint_like(x1, low=0, high=2) * 2 - 1).to(device)
 
-        # ODE system
         def dynamics(t, states):
-            x_t, log_det = states                                # xt:[B,H,D] , log_det:[B]
-            x_t = x_t.requires_grad_(True)
+            x_t, log_det = states
+            x_t.requires_grad_()
 
-            # velocity field v_t(x)
             t_batch = torch.full((B,), t.item(), device=device)
-            ut = self.model(x_t, None, t_batch)                  # [B,H,D]
+            ut = self.model(x_t, None, t_batch)
 
-            # divergence -- exact or Hutchinson
-            if exact_div:
-                div = torch.zeros(B, device=device)
-                # trace of Jacobian
-                for idx in range(ut.flatten(1).shape[1]):
-                    div += torch.autograd.grad(
-                        ut.flatten(1)[:, idx].sum(), x_t,
-                        create_graph=False, retain_graph=True
-                    )[0].flatten(1)[:, idx]
-            else:
-                dot = (ut * z).sum()                            # scalar
-                grad = torch.autograd.grad(dot, x_t, create_graph=False, retain_graph=True)[0]
-                div = (grad * z).flatten(1).sum(dim=1)          # [B]
+            dot = (ut * z).sum()
+            grad = torch.autograd.grad(dot, x_t, create_graph=False, retain_graph=False)[0]
+            div = (grad * z).flatten(1).sum(dim=1)
 
-            return (ut, div)                                    # x_dot = u , l_dot = div(v_t)
+            return ut, div
 
-        # integrate backward  t:1 -> 0
-        t_grid = self.adaptive_scheduling(num_steps, 1.0, device=device)  # adaptive scheduling (0->1)
-        t_grid = torch.flip(t_grid, dims=[0])  # reverse time grid 1->0
+        t_grid = torch.linspace(0, 1, num_steps).to(device)
+        t_grid = torch.flip(t_grid, dims=[0])
 
         y0 = (x1, torch.zeros(B, device=device))
 
         sol_x, sol_log = torchdiffeq.odeint(
-            dynamics,
-            y0,
-            t_grid,
-            method='euler',  # 'euler', 'rk4', 'dopri5'
-            atol=1e-5,
-            rtol=1e-5
+            dynamics, y0, t_grid, method='dopri5', atol=1e-5, rtol=1e-5
         )
 
-        x0      = sol_x[-1]                  # latent sample at t = 0
-        log_det = sol_log[-1]                # ∫ div(v_t) dt   (sign handled by time grid)
-
-        # final log-prob & NLL
-        log_px1 = log_p0(x0) + log_det       # log p(x1)
-        nll     = -log_px1.mean()            # averaged over batch
-
+        x0 = sol_x[-1]
+        log_det = sol_log[-1]
+        log_px1 = log_p0(x0) + log_det
+        nll = -log_px1.mean()
+        print(f"log_p0: {log_p0(x0)}")
+        print(f"log_det: {log_det}")
+              
         return x0, nll
-    
-    # def adaptive_scheduling(self, num_steps, lmbd=1.0, device=None):
-    #     N = num_steps
-    #     # 1) dt_i = (2λ)/(N(N+1))*(N-(i-1)) + (1-λ)/N
-    #     steps = [
-    #         (2 * lmbd) / (N * (N + 1)) * (N - (i - 1)) + (1 - lmbd) / N
-    #         for i in range(1, N + 1)
-    #     ]
-    #     # 2) t_0=0.0, t_i = t_{i-1} + dt_i
-    #     t = 0.0
-    #     t_grid = [t]
-    #     for dt in steps:
-    #         t += dt
-    #         t_grid.append(t)
-
-    #     return torch.tensor(t_grid, device=device)
     
     def adaptive_scheduling(self, num_steps, device=None):
         # O((1-t)^3)

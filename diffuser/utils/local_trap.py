@@ -62,7 +62,6 @@ def local_trap(traj_tensor, cbf, batch_idx=0, n_timesteps=256):
     for i in range(traj.shape[0]):
         #if num_of_trap > 1:
         #    break
-        print("i: ", i)
         if distances_long[i] > dist_thr and min_cbf_values[i] < cbf_thr:
             print(f"trapped: {i}/ distance: {distances_long[i]}, cbf: {min_cbf_values[i]}")
             num_of_trap += 1

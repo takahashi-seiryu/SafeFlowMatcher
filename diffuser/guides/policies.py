@@ -60,15 +60,13 @@ class Policy:
         sample, diffusion, iter_time = self.diffusion_model(conditions)
 
         #calc trap1 trap2####################################################
-        # trap1, trap2 = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
-        trap1, trap2 = 0, 0
+        trap1, trap2 = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
 
         #if get elbo/NLL (diffuser) ####################################################for elbo/NLL
         # import pickle
         # with open('./diffuser.pkl', 'rb') as f:  # load a data from diffuser as a baseline
         #     data = pickle.load(f)
         # diffuser_state = torch.tensor(data['gt']).float().to(self.device) 
-        # f.close()
         # diff_num = diffusion.shape[1]
         # elbo = []
         # sum_elbo = 0
@@ -79,7 +77,12 @@ class Policy:
         #     elbo.append(elboi)
         # sum_elbo = sum_elbo.detach().cpu().numpy()[0]/255  #ave
         #elif get NLL (flow matcher)#####################################################################
-        # _, nll = self.diffusion_model.compute_nll(sample, num_steps=200, exact_div=False)
+        # import pickle
+        # with open('./cfm.pkl', 'rb') as f:  # load a data from diffuser as a baseline
+        #     data = pickle.load(f)
+        # diffuser_state = torch.tensor(data['gt']).float().to(self.device)
+
+        # _, nll = self.diffusion_model.compute_nll(diffuser_state, num_steps=256)
         # sum_elbo = nll.item()
         #else ##########################################################################################
         sum_elbo = 0
@@ -87,6 +90,14 @@ class Policy:
 
         sample = utils.to_np(sample)
         diffusion = utils.to_np(diffusion)
+
+        #####################################################for elbo, # save a data from diffuser as a baseline
+        # data = {'gt': diffusion[:,-1,:,:]}
+        # import pickle
+        # output = open('./cfm.pkl', 'wb') 
+        # pickle.dump(data, output)
+        # output.close()
+        #######################################################################
 
         ## extract action [ batch_size x horizon x transition_dim ]
         actions = sample[:, :, :self.action_dim]

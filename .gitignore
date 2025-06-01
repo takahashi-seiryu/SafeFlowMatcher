@@ -12,6 +12,7 @@ analy_*
 trajectory_segments.png
 
 # Model
+cfm.pkl
 diffuser.pkl
 
 gym/
