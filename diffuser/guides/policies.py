@@ -63,41 +63,34 @@ class Policy:
         trap1, trap2 = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
 
         #if get elbo/NLL (diffuser) ####################################################for elbo/NLL
-        # import pickle
-        # with open('./diffuser.pkl', 'rb') as f:  # load a data from diffuser as a baseline
-        #     data = pickle.load(f)
-        # diffuser_state = torch.tensor(data['gt']).float().to(self.device) 
-        # diff_num = diffusion.shape[1]
-        # elbo = []
-        # sum_elbo = 0
-        # for step in range(0, diff_num-2, 1):
-        #     timesteps = torch.full((batch_size,), diff_num-2 - step, device=self.device, dtype=torch.long)
-        #     elboi = self.diffusion_model._vb_terms_bpd(diffuser_state, conditions, diffusion[:,step,:,:], timesteps)
-        #     sum_elbo = sum_elbo + elboi
-        #     elbo.append(elboi)
-        # sum_elbo = sum_elbo.detach().cpu().numpy()[0]/255  #ave
-        #elif get NLL (flow matcher)#####################################################################
-        # import pickle
-        # with open('./cfm.pkl', 'rb') as f:  # load a data from diffuser as a baseline
-        #     data = pickle.load(f)
-        # diffuser_state = torch.tensor(data['gt']).float().to(self.device)
-
-        # _, nll = self.diffusion_model.compute_nll(diffuser_state, num_steps=256)
-        # sum_elbo = nll.item()
-        #else ##########################################################################################
+        x_0 = diffusion[:,-1,:,:]
+        diff_num = diffusion.shape[1]
+        elbo = []
         sum_elbo = 0
-        #end#########################################################################
+        x_T = torch.randn_like(x_0, device=self.device)
+        
+        prior_bpd = self.diffusion_model._prior_bpd(x_T, diff_num-1) # L_T
+        sum_elbo = sum_elbo + prior_bpd
+        elbo.append(prior_bpd)
+        for step in range(0, diff_num-1, 1): # L_t-1 ~ L_1
+            timesteps = torch.full((batch_size,), diff_num-2 - step, device=self.device, dtype=torch.long)
+            x_t = self.diffusion_model.q_sample(x_0, timesteps, x_T)
+            elboi = self.diffusion_model._vb_terms_bpd(x_0, conditions, x_t, timesteps)
+            sum_elbo = sum_elbo + elboi
+            elbo.append(elboi)
+
+
+
+        sum_elbo = sum_elbo.detach().cpu().numpy()[0]#/(diff_num) 생각해보니까 나누기왜함?
+        #elif get NLL (flow matcher)#####################################################################
+        # _, nll = self.diffusion_model.compute_nll(sample, num_steps=200, exact_div=False)
+        # sum_elbo = nll.item()
+        # else ##########################################################################################
+        # sum_elbo = 0
+        # end#########################################################################
 
         sample = utils.to_np(sample)
         diffusion = utils.to_np(diffusion)
-
-        #####################################################for elbo, # save a data from diffuser as a baseline
-        # data = {'gt': diffusion[:,-1,:,:]}
-        # import pickle
-        # output = open('./cfm.pkl', 'wb') 
-        # pickle.dump(data, output)
-        # output.close()
-        #######################################################################
 
         ## extract action [ batch_size x horizon x transition_dim ]
         actions = sample[:, :, :self.action_dim]

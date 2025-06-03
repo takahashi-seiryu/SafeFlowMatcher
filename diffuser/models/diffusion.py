@@ -1197,6 +1197,24 @@ class GaussianDiffusion(nn.Module):
 
     #------------------------------------------ training ------------------------------------------#
 
+    def q_mean_variance(self, x_start, t):
+        """
+        Get the distribution q(x_t | x_0).
+
+        :param x_start: the [N x C x ...] tensor of noiseless inputs.
+        :param t: the number of diffusion steps (minus 1). Here, 0 means one step.
+        :return: A tuple (mean, variance, log_variance), all of x_start's shape.
+        """
+        mean = (
+            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
+        )
+        variance = extract(1.0 - self.alphas_cumprod, t, x_start.shape)
+        log_variance = extract(
+            self.log_one_minus_alphas_cumprod, t, x_start.shape
+        )
+        return mean, variance, log_variance
+
+
     def q_sample(self, x_start, t, noise=None):
         if noise is None:
             noise = torch.randn_like(x_start)
@@ -1248,32 +1266,52 @@ class GaussianDiffusion(nn.Module):
         # batch_size = x_start.shape(0)
         # conditions = self._format_conditions(conditions, batch_size)
 
-        true_mean, _, true_log_variance_clipped = self.q_posterior(
-            x_start=x_start, x_t=x_t, t=t
-        )
+        true_mean, _, true_log_variance_clipped = self.q_posterior(x_start=x_start, x_t=x_t, t=t)
+        mean, _, log_variance = self.p_mean_variance(x_t, conditions, t)
         
-        mean, _, log_variance = self.p_mean_variance(
-             x_t, conditions, t)
-        kl = normal_kl(
-            true_mean, true_log_variance_clipped, mean, log_variance
-        )
-        kl = mean_flat(kl) / np.log(2.0)
+        if t != 0:
+            kl = normal_kl(
+                true_mean, true_log_variance_clipped, mean, log_variance
+            )
+            kl = mean_flat(kl) / np.log(2.0)
+            
+            return kl
 
-        # import pdb; pdb.set_trace()
-        # decoder_nll = -discretized_gaussian_log_likelihood(
-        #     x_start, means=mean, log_scales=0.5 * log_variance
-        # )
-        
-        # assert decoder_nll.shape == x_start.shape
-        # decoder_nll = mean_flat(decoder_nll) / np.log(2.0)
+        else:
+            # import pdb; pdb.set_trace()
+            log_variance = torch.full_like(x_start, log_variance.item(), dtype=torch.float32)
+            decoder_nll = -discretized_gaussian_log_likelihood(
+                x_start, means=mean, log_scales=0.5 * log_variance
+            )
+                
+            assert decoder_nll.shape == x_start.shape
+            decoder_nll = mean_flat(decoder_nll) / np.log(2.0)
 
         # At the first timestep return the decoder NLL,
         # otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
 
         # output = torch.where((t == 0), decoder_nll, kl)
 
-        return kl
+            return decoder_nll
 
+
+    def _prior_bpd(self, x_start, num_timesteps):
+        """
+        Get the prior KL term for the variational lower-bound, measured in
+        bits-per-dim.
+
+        This term can't be optimized, as it only depends on the encoder.
+
+        :param x_start: the [N x C x ...] tensor of inputs.
+        :return: a batch of [N] KL values (in bits), one per batch element.
+        """
+        batch_size = x_start.shape[0]
+        t = torch.tensor([num_timesteps - 1] * batch_size, device=x_start.device)
+        qt_mean, _, qt_log_variance = self.q_mean_variance(x_start, t)
+        kl_prior = normal_kl(
+            mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0
+        )
+        return mean_flat(kl_prior) / np.log(2.0)
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond=cond, *args, **kwargs)
