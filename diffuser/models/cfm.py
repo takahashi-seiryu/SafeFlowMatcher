@@ -229,7 +229,7 @@ class CFM(nn.Module):
         time_list = self.adaptive_scheduling(T, device=self.device)
         # Uniform scheduling
         # time_list = torch.linspace(0, 1, T).to(self.device)  # [0, 1] for uniform scheduling
-        print(f"Adaptive scheduling: {time_list}")
+        # print(f"Adaptive scheduling: {time_list}")
         
         traj = [x0_2nd_phase]
         
