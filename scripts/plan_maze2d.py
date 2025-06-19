@@ -11,7 +11,10 @@ import diffuser.datasets as datasets
 import diffuser.utils as utils
 import torch
 
-# python scripts/plan_maze2d.py --config config.maze2d --dataset maze2d-large-v1
+# diffusion model:
+# python scripts/plan_maze2d.py --config config.maze2d --dataset maze2d-large-v1 --logbase logs --method base
+# cfm model:
+# python scripts/plan_maze2d.py --config config.maze2d --dataset maze2d-large-v1 --logbase logs --method cfm
 
 class Parser(utils.Parser):
     dataset: str = 'maze2d-umaze-v1'
@@ -24,8 +27,6 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 #---------------------------------- setup ----------------------------------#
 
 args = Parser().parse_args('plan')
-
-# logger = utils.Logger(args)
 
 env = datasets.load_environment(args.dataset)
 
@@ -64,16 +65,15 @@ if not os.path.exists(csv_path):
 #---------------------------------- main loop ----------------------------------#
 safe1_batch, safe2_batch = [], []
 score_batch = []
-compute_time = []
 elbo_batch = []
+is_trap1, is_trap2 = 0, 0
 num_trap1, num_trap2 = 0, 0
 num_success = 0
 iter_time_batch = []
-test_num = 1
 
-TOTAL_TEST_RUN = 1
-for iter in range(TOTAL_TEST_RUN):   # num of testing runs
-    print("step: ", iter, f"/{test_num}")
+TOTAL_TEST_ITER = 10
+for iter in range(1, TOTAL_TEST_ITER+1):   # num of testing runs
+    print("Total test iteration: ", iter, f"/{TOTAL_TEST_ITER}")
 
     observation = env.reset()    #array([ 0.94875744,  8.93648809, -0.01347715,  0.06358764])
     observation = np.array([ 0.94875744,  2.93648809, -0.01347715,  0.06358764])   # fix the initial position and final destination for comparison (not needed for general testing)
@@ -102,10 +102,7 @@ for iter in range(TOTAL_TEST_RUN):   # num of testing runs
         if t == 0:
 
             cond[0] = observation
-            start_time = time.time()
-            action, samples, diffusion_paths, safe1, safe2, elbo, trap1, trap2, iter_time = policy(cond, batch_size=args.batch_size)
-            end_time = time.time()
-            compute_time.append(end_time - start_time)
+            action, samples, diffusion_paths, safe1, safe2, elbo, num_trap, iter_time = policy(cond, batch_size=args.batch_size)
             elbo_batch.append(elbo)
             safe1_val, safe2_val = safe1.item(), safe2.item()
             
@@ -118,17 +115,17 @@ for iter in range(TOTAL_TEST_RUN):   # num of testing runs
             fullpath = join(args.savepath, f'{iter}.png')
             renderer.composite(fullpath, samples.observations, ncol=1)
 
-            # Save the diffusion process as a video
-            # diffusion_sm = smooth(diffusion_paths)  # smooth the generated traj.
-            diffusion_sm = diffusion_paths            # do not smooth the generated traj.
-            renderer.render_diffusion(join(args.savepath, f'diffusion.mp4'), diffusion_sm)
+            # # Save the diffusion process as a video
+            # # diffusion_sm = smooth(diffusion_paths)  # smooth the generated traj.
+            # diffusion_sm = diffusion_paths            # do not smooth the generated traj.
+            # renderer.render_diffusion(join(args.savepath, f'diffusion.mp4'), diffusion_sm)
 
-            # Save individual frames of the diffusion process
-            diff_step = diffusion_sm.shape[0]  
-            makedirs(join(args.savepath, 'png'))
-            for kk in range(diff_step):
-                imgpath = join(args.savepath, f'png/{kk}.png')
-                renderer.composite(imgpath, diffusion_sm[kk:kk+1], ncol=1)
+            # # Save individual frames of the diffusion process
+            # diff_step = diffusion_sm.shape[0]  
+            # makedirs(join(args.savepath, 'png'))
+            # for kk in range(diff_step):
+            #     imgpath = join(args.savepath, f'png/{kk}.png')
+            #     renderer.composite(imgpath, diffusion_sm[kk:kk+1], ncol=1)
             ##################################################end saving videos/images
 
         ##################################################start planning
@@ -191,10 +188,17 @@ for iter in range(TOTAL_TEST_RUN):   # num of testing runs
     if reward > 0.95:
         num_success = num_success + 1
 
-    if trap1 == True:
+    if num_trap >= 1:
+        is_trap1 = 1
         num_trap1 += 1
-    if trap2 == True:
+    else:
+        is_trap1 = 0
+    
+    if num_trap >= 2:
+        is_trap2 = 1
         num_trap2 += 1
+    else:
+        is_trap2 = 0
 
     safe1_batch.append(safe1_val)
     safe2_batch.append(safe2_val)
@@ -206,8 +210,6 @@ for iter in range(TOTAL_TEST_RUN):   # num of testing runs
 
     ##################################################start per-iter statistics calculation
     # per-iter statistics calculation
-    trap1_val    = int(trap1)
-    trap2_val    = int(trap2)
     score_val    = float(score)
     itertime_val = float(iter_time[0])
     success_val  = 1 if reward > 0.95 else 0
@@ -219,8 +221,8 @@ for iter in range(TOTAL_TEST_RUN):   # num of testing runs
             iter,
             safe1_val,
             safe2_val,
-            trap1_val,
-            trap2_val,
+            is_trap1,
+            is_trap2,
             score_val,
             itertime_val,
             success_val
@@ -239,15 +241,13 @@ print("elbo mean: ", np.mean(elbo_batch))
 print("elbo std: ", np.std(elbo_batch))
 
 score_batch = np.array(score_batch)
-compute_time = np.array(compute_time)
 print(f"safe1: {np.mean(safe1_batch):.4f} ± {np.std(safe1_batch):.4f}")
 print(f"safe2: {np.mean(safe2_batch):.4f} ± {np.std(safe2_batch):.4f}")
-print("trap1: ", num_trap1)
-print("trap2: ", num_trap2)
+print(f"trap1: {num_trap1} / {TOTAL_TEST_ITER}")
+print(f"trap2: {num_trap2} / {TOTAL_TEST_ITER}")
 print(f"score: {np.mean(score_batch):.5f} ± {np.std(score_batch):.5f}")
-print("computation time: ", np.mean(compute_time))
 print("avg iter time: ", iter_time_avg[0])
-print(f"number of success: {num_success} / {TOTAL_TEST_RUN}")
+print(f"number of success: {num_success} / {TOTAL_TEST_ITER}")
 print("=======================end=========================")
 
 # --------------------------------- plot ----------------------------------#
@@ -286,17 +286,33 @@ except Exception as e:
 try:
     json_path = join(args.savepath, 'rollout.json')
     json_data = {
-        'score': float(score),
-        'step': int(t),
-        'return': float(total_reward),
-        'term': bool(terminal),
-        'epoch_diffusion': int(diffusion_experiment.epoch),
         'safety_stats': {
             'safe1_mean': float(np.mean(safe1_batch)),
             'safe2_mean': float(np.mean(safe2_batch)),
             'safe1_std': float(np.std(safe1_batch)),
-            'safe2_std': float(np.std(safe2_batch))
-        }
+            'safe2_std': float(np.std(safe2_batch)),
+            'safe1_min': float(np.min(safe1_batch)),
+            'safe2_min': float(np.min(safe2_batch))
+        },
+        'score_stats': {
+            'mean': float(np.mean(score_batch)),
+            'std': float(np.std(score_batch)),
+            'min': float(np.min(score_batch)),
+            'max': float(np.max(score_batch))
+        },
+        'iter_time_batch': {
+            'mean': float(np.mean(iter_time_batch)),
+            'std': float(np.std(iter_time_batch)),
+            'min': float(np.min(iter_time_batch)),
+            'max': float(np.max(iter_time_batch))
+        },
+        'local_trap1': f'{num_trap1}/{TOTAL_TEST_ITER}',
+        'local_trap2': f'{num_trap2}/{TOTAL_TEST_ITER}',
+        'denoising_step': args.n_diffusion_steps,
+        # 'step': int(t),
+        # 'return': float(total_reward),
+        # 'term': bool(terminal),
+        # 'epoch_diffusion': int(diffusion_experiment.epoch),
     }
     with open(json_path, 'w') as f:
         json.dump(json_data, f, indent=2, sort_keys=True)

@@ -87,7 +87,7 @@ base = {
         'logbase': 'logs',
         'prefix': 'plans/release',
         'exp_name': watch(plan_args_to_watch),
-        'suffix': '58',
+        'suffix': 'test',
 
         'conditional': False,
 
@@ -159,7 +159,7 @@ cfm = {
         'logbase': 'logs',
         'prefix': 'plans/release',
         'exp_name': watch(plan_args_to_watch),
-        'suffix': '58',
+        'suffix': 'test',
 
         'conditional': False,
 
@@ -206,14 +206,17 @@ maze2d_large_v1 = {
         # One Shot Initialization
         'one_shot_enabled': False,  # True, False
 
-        ## CBF
+        ## CBF for flow matching
         'obstacles': [
             {'order': 2, 'center': (5.8, 5.0), 'radius': 1},
             {'order': 4, 'center': (5.3, 2.0), 'radius': 1},
         ],
-        'cbf_solver': 'qp',   # 'qp', 'closed_form'
+        'cbf_solver': 'closed_form',   # 'qp', 'closed_form'
         'cbf_method': 'relax', # 'robust', 'relax', 'time'
         'robust_term': 0.01,  # 0.01, 0.1
         'relax_threshold': 0.9999,
+
+        # set suffix
+        'suffix': 'test'
     },
 }

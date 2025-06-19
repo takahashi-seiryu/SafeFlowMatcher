@@ -59,8 +59,8 @@ class Policy:
         self.diffusion_model.norm_maxs = self.normalizer.normalizers['observations'].maxs
         sample, diffusion, iter_time = self.diffusion_model(conditions)
 
-        #calc trap1 trap2####################################################
-        trap1, trap2 = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
+        ########################################################## calculate number of traps
+        num_trap = utils.local_trap(diffusion, self.diffusion_model.cbf, batch_idx=0, n_timesteps=255)
 
         #if get elbo/NLL (diffuser) ####################################################for elbo/NLL
         x_0 = diffusion[:,-1,:,:]
@@ -108,4 +108,4 @@ class Policy:
         diffusions = self.normalizer.unnormalize(normed_diffusion, 'observations')
 
         trajectories = Trajectories(actions, observations)
-        return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo, trap1, trap2, iter_time
+        return action, trajectories, diffusions, self.diffusion_model.safe1, self.diffusion_model.safe2, sum_elbo, num_trap, iter_time

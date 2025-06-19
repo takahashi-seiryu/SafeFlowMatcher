@@ -62,7 +62,7 @@ class CBF:
 
             if t <= self.relax_threshold:
                 ratio = t / self.relax_threshold
-                sign = 100.0 * (1 - math.exp(3 * (ratio - 1)))  # exp drop near t=relax_threshold
+                sign = 200.0 * (1 - math.exp(3 * (ratio - 1)))  # exp drop near t=relax_threshold
             else:
                 sign = 0.0
 
@@ -85,7 +85,7 @@ class CBF:
         else:
             raise ValueError(f"Unknown CBF method {self.cbf_method}")
 
-        safe = torch.min(b + delta)
+        safe = torch.min(b)
         return G, h, safe
     
     @torch.no_grad()
