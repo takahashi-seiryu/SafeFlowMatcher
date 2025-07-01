@@ -208,9 +208,13 @@ maze2d_large_v1 = {
 
         ## CBF for flow matching
         'obstacles': [
-            {'order': 2, 'center': (5.8, 5.0), 'radius': 1},
-            {'order': 4, 'center': (5.3, 2.0), 'radius': 1},
+            {'order': 2, 'center': (5.6, 4.8), 'radius': 1},
+            {'order': 4, 'center': (5.1, 1.8), 'radius': 1},
         ],
+        #     'obstacles': [
+        #     {'order': 2, 'center': (5.8, 5.0), 'radius': 1},
+        #     {'order': 4, 'center': (5.3, 2.0), 'radius': 1},
+        # ],
         'cbf_solver': 'closed_form',   # 'qp', 'closed_form'
         'cbf_method': 'relax', # 'robust', 'relax', 'time'
         'robust_term': 0.01,  # 0.01, 0.1

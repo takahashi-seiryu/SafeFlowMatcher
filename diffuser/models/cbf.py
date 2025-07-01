@@ -49,7 +49,7 @@ class CBF:
         delta = self.robust_term
 
         # construct b(x)
-        b = dy**order + dx**order - 1 - delta
+        b = dy**order + dx**order - (1 + delta)
 
         if self.cbf_method == 'robust':
             G = torch.cat([-L1, -L2], dim=1).unsqueeze(1)
