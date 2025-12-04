@@ -16,7 +16,7 @@ from denoising_diffusion_pytorch.mixer import MixerUnet as MixerUnetNew
 from denoising_diffusion_pytorch.temporal_attention import TemporalUnet
 from denoising_diffusion_pytorch.utils.rendering import KukaRenderer
 import diffusion.utils as utils
-import environments
+# import environments
 from imageio import get_writer
 import torch.nn as nn
 
@@ -245,8 +245,11 @@ def eval_episode(model, env, dataset, idx=0):
         # samples = samples_orig = trainer.ema_model.guided_conditional_sample(model, 1, conditions, cond_idxs[i], stack_idxs[i], place_idxs[i])
         trainer.ema_model.mins = torch.tensor(dataset.mins[:7])
         trainer.ema_model.maxs = torch.tensor(dataset.maxs[:7])
+        
+        start = time.time()
         samples, diffusion, b_min = samples_orig, diffusion_orig, b_min_orig = trainer.ema_model.conditional_sample(1, conditions)
-
+        end = time.time()
+        
         samples = torch.clamp(samples, -1, 1)
         samples_unscale = (samples + 1) * 0.5
         samples = dataset.unnormalize(samples_unscale)
@@ -281,14 +284,14 @@ def eval_episode(model, env, dataset, idx=0):
         os.makedirs("uncond_samples_CBF_cf/")
 
     writer = get_writer("uncond_samples_CBF_cf/uncond_video_writer{}.mp4".format(idx))
-
+    print(f"Saving video to uncond_samples_CBF_cf/uncond_video_writer{idx}.mp4")
     for frame in frames:
         writer.append_data(frame)
 
     np.save("uncond_samples_CBF_cf/uncond_sample_{}.npy".format(idx), np.array(total_samples))
 
 
-    return rewards, b_min
+    return rewards, b_min, (end-start)
 
 
 class PosGuide(nn.Module):
@@ -459,14 +462,13 @@ b_batch = []
 time_batch = []
 import time
 
-for i in tqdm(range(20)):  #100
-    start = time.time()
-    reward, b_min = eval_episode(model, env, dataset, idx=i)
-    end = time.time()
+for i in tqdm(range(100)):  #100
+    reward, b_min, end_start = eval_episode(model, env, dataset, idx=i)
     # assert False
     rewards.append(reward)
-    b_batch.append(b_min.cpu().numpy())
-    time_batch.append(end-start)
+    # b_batch.append(b_min.cpu().numpy())
+    b_batch.append(b_min)
+    time_batch.append(end_start)
     print("rewards mean: ", np.mean(rewards))
     print("rewards std: ", np.std(rewards) / len(rewards) ** 0.5)
     print("safety: ", np.min(b_batch))

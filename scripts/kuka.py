@@ -6,12 +6,12 @@ import gym
 import d4rl
 
 from denoising_diffusion_pytorch.datasets.tamp import KukaDataset
-from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer
+from denoising_diffusion_pytorch.denoising_cfm_pytorch import  ConditionalFlowMatching, Trainer
 from denoising_diffusion_pytorch.mixer import MixerUnet
 # from denoising_diffusion_pytorch.temporal import TemporalMixerUnet
 from denoising_diffusion_pytorch.temporal_attention import TemporalUnet
 from denoising_diffusion_pytorch.utils.rendering import KukaRenderer
-import environments
+# import environments
 import sys
 sys.path.append('/data/vision/billf/scratch/yilundu/pddlstream')
 
@@ -61,7 +61,15 @@ model = TemporalUnet(
 ).cuda()
 
 
-diffusion = GaussianDiffusion(
+# diffusion = GaussianDiffusion(
+#     model,
+#     channels = 1,
+#     image_size = (H, obs_dim),
+#     timesteps = 1000,   # number of steps
+#     loss_type = 'l1'    # L1 or L2
+# ).cuda()
+
+diffusion = ConditionalFlowMatching(
     model,
     channels = 1,
     image_size = (H, obs_dim),
