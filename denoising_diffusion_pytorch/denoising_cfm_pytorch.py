@@ -7,6 +7,7 @@ from inspect import isfunction
 from functools import partial
 import pdb
 
+from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
 
 from torch.utils import data
 from pathlib import Path
@@ -311,7 +312,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return np.clip(betas, a_min = 0, a_max = 0.999)
 
-class GaussianDiffusion(nn.Module):
+class ConditionalFlowMatching(nn.Module):
     def __init__(
         self,
         denoise_fn,
@@ -326,49 +327,16 @@ class GaussianDiffusion(nn.Module):
         self.channels = channels
         self.image_size = image_size
         self.denoise_fn = denoise_fn
-
-        if exists(betas):
-            betas = betas.detach().cpu().numpy() if isinstance(betas, torch.Tensor) else betas
-        else:
-            betas = cosine_beta_schedule(timesteps)
-
-        alphas = 1. - betas
-        alphas_cumprod = np.cumprod(alphas, axis=0)
-        alphas_cumprod_prev = np.append(1., alphas_cumprod[:-1])
-
-        timesteps, = betas.shape
+        
+        self.betas = cosine_beta_schedule(timesteps)
+        self.device = 'cuda'
+        timesteps, = self.betas.shape
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
+        
+        self.FM = ConditionalFlowMatcher(sigma=0.0)
 
         to_torch = partial(torch.tensor, dtype=torch.float32)
-
-        self.register_buffer('betas', to_torch(betas))
-        self.register_buffer('alphas_cumprod', to_torch(alphas_cumprod))
-        self.register_buffer('alphas_cumprod_prev', to_torch(alphas_cumprod_prev))
-
-        # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.register_buffer('sqrt_alphas_cumprod', to_torch(np.sqrt(alphas_cumprod)))
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', to_torch(np.sqrt(1. - alphas_cumprod)))
-        self.register_buffer('log_one_minus_alphas_cumprod', to_torch(np.log(1. - alphas_cumprod)))
-        self.register_buffer('sqrt_recip_alphas_cumprod', to_torch(np.sqrt(1. / alphas_cumprod)))
-        self.register_buffer('sqrt_recipm1_alphas_cumprod', to_torch(np.sqrt(1. / alphas_cumprod - 1)))
-
-        # calculations for posterior q(x_{t-1} | x_t, x_0)
-        posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
-        # above: equal to 1. / (1. / (1. - alpha_cumprod_tm1) + alpha_t / beta_t)
-        self.register_buffer('posterior_variance', to_torch(posterior_variance))
-        # below: log calculation clipped because the posterior variance is 0 at the beginning of the diffusion chain
-        self.register_buffer('posterior_log_variance_clipped', to_torch(np.log(np.maximum(posterior_variance, 1e-20))))
-        self.register_buffer('posterior_mean_coef1', to_torch(
-            betas * np.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod)))
-        self.register_buffer('posterior_mean_coef2', to_torch(
-            (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod)))
-
-    # def q_mean_variance(self, x_start, t):
-    #     mean = extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-    #     variance = extract(1. - self.alphas_cumprod, t, x_start.shape)
-    #     log_variance = extract(self.log_one_minus_alphas_cumprod, t, x_start.shape)
-    #     return mean, variance, log_variance
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (
@@ -393,53 +361,6 @@ class GaussianDiffusion(nn.Module):
 
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance
-
-    @torch.no_grad()
-    def p_sample(self, x, mask, t, clip_denoised=True, repeat_noise=False):
-        b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, mask=mask, t=t, clip_denoised=clip_denoised)
-        noise = noise_like(x.shape, device, repeat_noise)
-        # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        xp1 = model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
-        b_min = 0 # training only
-        #######################################################################################choose one
-        # xp1, b_min = self.GD(x, xp1)  # classifier guidance or potential based method
-        # xp1, b_min = self.Shield(x, xp1) # truncate method
-        # xp1, b_min = self.invariance(x, xp1) # RoS diffuser
-        # xp1, b_min = self.invariance_cf(x, xp1)  # RoS diffuser closed-form
-        # xp1, b_min = self.invariance_cpx(x, xp1) # RoS diffuser with complex safety specification
-        xp1, b_min = self.invariance_cpx_cf(x, xp1) # RoS diffuser with complex safety specification, closed-form
-
-        #################### diffuser only, for evaluation only
-        # nBatch = x.shape[0]
-        # limits = torch.tensor(np.array([[-2.96705973,  2.96705973],
-        #     [-2.0943951 ,  2.0943951 ],
-        #     [-2.96705973,  2.96705973],
-        #     [-2.0943951 ,  2.0943951 ],
-        #     [-2.96705973,  2.96705973],
-        #     [-2.0943951 ,  2.0943951 ],
-        #     [-3.05432619,  3.05432619]])).to(x.device)
-        
-        # limits[:,0] = (limits[:,0] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # limits[:,1] = (limits[:,1] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # # limits = limits[None, None, None].cuda()
-        # limits = (limits - 0.5) * 2
-        # limits = limits.unsqueeze(0).expand(nBatch, 128, 7, 2)
-        
-        # # b1 = limits[:,:,:,1]-0.05 - x[:,:,0:7]
-        # # b2 = x[:,:,0:7] - (limits[:,:,:,0] + 0.05)
-
-        # x_cp = x.clone()
-        # x_cp[:,1:,:] = x_cp[:,:-1,:].clone()
-        # b1 = limits[:,:,:,1]-0.05 - (x[:,:,0:7] + 0.05*(x[:,:,0:7] - x_cp[:,:,0:7])/0.1)
-        # b2 = x[:,:,0:7] + 0.05*(x[:,:,0:7] - x_cp[:,:,0:7])/0.1 - (limits[:,:,:,0] + 0.05)
-
-        # b = torch.cat([b1,b2], dim = 0)
-        # b_min = b.min()
-        ######################## end diffuser
-        
-        return xp1, b_min
     
     @torch.no_grad()   
     def invariance(self, x, xp1):  # RoS diffuser
@@ -467,31 +388,29 @@ class GaussianDiffusion(nn.Module):
 
         #CBF
         ############################################CBF
-        b = limits[:,:,1]-0.05 - x[:,0:7] # - 0.1*x[:,15:16] 
+        epsilon = 1
+        rho = 0.99
+        
+        b1 = limits[:,:,1]-0.05 - x[:,0:7] 
         Lfb = 0 
         Lgbu1 = -1*torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
 
-        G = torch.zeros(nBatch, 7, 7).to(x.device)
+        G1 = torch.zeros(nBatch, 7, 7).to(x.device)
         for i in range(7):
-            G[:, i, i] = -Lgbu1[:,i]
-        k = 1
-        h = Lfb + k*b
+            G1[:, i, i] = -Lgbu1[:,i]
+        h1 = Lfb + epsilon * torch.sign(b1) * torch.abs(b1)**rho
 
-        b = x[:,0:7] - (limits[:,:,0] + 0.05) # - 0.1*x[:,15:16] 
-        b2 = b
+        b2 = x[:,0:7] - (limits[:,:,0] + 0.05)
         Lfb = 0 
         Lgbu1 = torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
 
         G2 = torch.zeros(nBatch, 7, 7).to(x.device)
         for i in range(7):
             G2[:, i, i] = -Lgbu1[:,i]
-        k = 1
-        h2 = Lfb + k*b
+        h2 = Lfb + epsilon * torch.sign(b2) * torch.abs(b2)**rho
 
-        G = torch.cat([G, G2], dim = 1)
-        h = torch.cat([h, h2], dim = 1).float()
+        G = torch.cat([G1, G2], dim = 1)
+        h = torch.cat([h1, h2], dim = 1).float()
         
    
         q = -ref[:,0:7].to(G.device)
@@ -504,12 +423,12 @@ class GaussianDiffusion(nn.Module):
         rt = xp1.clone()      
         rt[:,0:7] = x[:,0:7] + out[:,0:7]
         rt = rt.unsqueeze(0)
-        return rt, torch.cat([b, b2]).min().item()
+        return rt, torch.cat([b, b2]).min()
 
 
 
     @torch.no_grad()   
-    def invariance_cf(self, x, xp1): # RoS diffuser, closed-form
+    def invariance_cf(self, x, xp1): 
 
         limits = torch.tensor(np.array([[-2.96705973,  2.96705973],
             [-2.0943951 ,  2.0943951 ],
@@ -528,50 +447,42 @@ class GaussianDiffusion(nn.Module):
         #normalize obstacle:
         limits[:,0] = (limits[:,0] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
         limits[:,1] = (limits[:,1] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # limits = limits[None, None, None].cuda()
         limits = (limits - 0.5) * 2
         limits = limits.unsqueeze(0).expand(nBatch, 7, 2)
 
         #CBF
         ############################################CBF
-        b = limits[:,:,1]-0.05 - x[:,0:7] # - 0.1*x[:,15:16] 
+        epsilon = 1
+        rho = 0.99
+        
+        b1 = limits[:,:,1]-0.05 - x[:,0:7]
         Lfb = 0 
         Lgbu1 = -1*torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
 
-        G = -Lgbu1.unsqueeze(2)
-        k = 1
-        h = Lfb + k*b
-        h = h.unsqueeze(2).float()
+        G1 = -Lgbu1.unsqueeze(2)
+        h1 = Lfb + epsilon * torch.sign(b1) * torch.abs(b1)**rho
+        h1 = h1.unsqueeze(2).float()
 
-        b = x[:,0:7] - (limits[:,:,0] + 0.05) # - 0.1*x[:,15:16] 
-        b2 = b
+        b2 = x[:,0:7] - (limits[:,:,0] + 0.05)
         Lfb = 0 
         Lgbu1 = torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
+        
         G2 = -Lgbu1.unsqueeze(2)
-        k = 1
-        h2 = Lfb + k*b
+        h2 = Lfb + epsilon * torch.sign(b2) * torch.abs(b2)**rho
         h2 = h2.unsqueeze(2).float()
          
         q = -ref[:,0:7].unsqueeze(2).to(G.device)
 
-        G0 = G
-        h0 = h
-        G1 = G2
-        h1 = h2
-        y1_bar = 1*G0  # H or Q = identity matrix
-        y2_bar = 1*G1
+        y1_bar = 1*G1  # H or Q = identity matrix
+        y2_bar = 1*G2
         u_bar = -1*q
-        p1_bar = h0 - torch.sum(G0*u_bar,dim = 2).unsqueeze(2)
-        p2_bar = h1 - torch.sum(G1*u_bar,dim = 2).unsqueeze(2)
+        p1_bar = h1 - torch.sum(G1*u_bar,dim = 2).unsqueeze(2)
+        p2_bar = h2 - torch.sum(G2*u_bar,dim = 2).unsqueeze(2)
 
         G = torch.cat([torch.sum(y1_bar*y1_bar,dim = 2).unsqueeze(2).unsqueeze(0), torch.sum(y1_bar*y2_bar,dim = 2).unsqueeze(2).unsqueeze(0), torch.sum(y2_bar*y1_bar,dim = 2).unsqueeze(2).unsqueeze(0), torch.sum(y2_bar*y2_bar,dim = 2).unsqueeze(2).unsqueeze(0)], dim = 0)
-        #G = 1*[y1_bar*y1_bar', y1_bar*y2_bar'; y2_bar*y1_bar', y2_bar*y2_bar']
         w_p1_bar = torch.clamp(p1_bar, max=0)
         w_p2_bar = torch.clamp(p2_bar, max=0)
 
-        # G 0-(1,1), 1-(1,2), 2-(2,1), 3-(2,2)
         lambda1 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, torch.zeros_like(p1_bar), torch.where(G[1]*w_p1_bar < G[0]*p2_bar, w_p1_bar/G[0], torch.clamp(G[3]*p1_bar - G[2]*p2_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
         
         lambda2 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, w_p2_bar/G[3], torch.where(G[1]*w_p1_bar < G[0]*p2_bar, torch.zeros_like(p1_bar), torch.clamp(G[0]*p2_bar - G[1]*p1_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
@@ -584,270 +495,70 @@ class GaussianDiffusion(nn.Module):
         rt = rt.unsqueeze(0)
         return rt, torch.cat([b, b2]).min().item()
     
-    
-    def invariance_cpx(self, x, xp1): # RoS diffuser with complex specification
-
-        limits = torch.tensor(np.array([[-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-3.05432619,  3.05432619]])).to(x.device)
-        
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle:
-        limits[:,0] = (limits[:,0] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        limits[:,1] = (limits[:,1] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # limits = limits[None, None, None].cuda()
-        limits = (limits - 0.5) * 2
-        limits = limits.unsqueeze(0).expand(nBatch, 7, 2)
-
-        #CBF
-        ############################################CBF
-        x_cp = x.clone()
-        x_cp[1:,:] = x_cp[:-1,:].clone()
-
-        b = limits[:,:,1]-0.05 - (x[:,0:7] + 0.05*(x[:,0:7] - x_cp[:,0:7])/0.1) # - 0.1*x[:,15:16] 
-        Lfb = 0 
-        Lgbu1 = -(1+0.05/0.1)*torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
-
-        G = torch.zeros(nBatch, 7, 7).to(x.device)
-        for i in range(7):
-            G[:, i, i] = -Lgbu1[:,i]
-        k = 1
-        h = Lfb + k*b
-
-        b = x[:,0:7] + 0.05*(x[:,0:7] - x_cp[:,0:7])/0.1 - (limits[:,:,0] + 0.05) # - 0.1*x[:,15:16] 
-        b2 = b
-        Lfb = 0 
-        Lgbu1 = (1+0.05/0.1)*torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
-
-        G2 = torch.zeros(nBatch, 7, 7).to(x.device)
-        for i in range(7):
-            G2[:, i, i] = -Lgbu1[:,i]
-        k = 1
-        h2 = Lfb + k*b
-
-        G = torch.cat([G, G2], dim = 1)
-        h = torch.cat([h, h2], dim = 1).float()
-        
-   
-        q = -ref[:,0:7].to(G.device)
-        Q = Variable(torch.eye(7))
-        Q = Q.unsqueeze(0).expand(nBatch, 7, 7).to(G.device)
-        
-        e = Variable(torch.Tensor())
-        out = QPFunction(verbose=-1, solver = QPSolvers.PDIPM_BATCHED)(Q, q, G, h, e, e)
-
-        rt = xp1.clone()      
-        rt[:,0:7] = x[:,0:7] + out[:,0:7]
-        rt = rt.unsqueeze(0)
-        return rt, torch.cat([b, b2]).min().item()
-    
-    def invariance_cpx_cf(self, x, xp1): # RoS diffuser with complex safety specification, closed-form
-
-        limits = torch.tensor(np.array([[-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-3.05432619,  3.05432619]])).to(x.device)
-        
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle:
-        limits[:,0] = (limits[:,0] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        limits[:,1] = (limits[:,1] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # limits = limits[None, None, None].cuda()
-        limits = (limits - 0.5) * 2
-        limits = limits.unsqueeze(0).expand(nBatch, 7, 2)
-
-        #CBF
-        ############################################CBF
-        x_cp = x.clone()
-        x_cp[1:,:] = x_cp[:-1,:].clone()
-
-        b = limits[:,:,1]-0.05 - (x[:,0:7] + 0.05*(x[:,0:7] - x_cp[:,0:7])/0.1) # - 0.1*x[:,15:16] 
-        Lfb = 0 
-        Lgbu1 = -(1+0.05/0.1)*torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
-
-        G = -Lgbu1.unsqueeze(2)
-        k = 1
-        h = Lfb + k*b
-        h = h.unsqueeze(2).float()
-
-        b = x[:,0:7] + 0.05*(x[:,0:7] - x_cp[:,0:7])/0.1 - (limits[:,:,0] + 0.05) # - 0.1*x[:,15:16] 
-        b2 = b
-        Lfb = 0 
-        Lgbu1 = (1+0.05/0.1)*torch.ones_like(x[:,0:7])
-        #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
-
-        G2 = -Lgbu1.unsqueeze(2)
-        k = 1
-        h2 = Lfb + k*b
-        h2 = h2.unsqueeze(2).float()
-         
-        q = -ref[:,0:7].unsqueeze(2).to(G.device)
-
-        G0 = G
-        h0 = h
-        G1 = G2
-        h1 = h2
-        y1_bar = 1*G0  # H or Q = identity matrix
-        y2_bar = 1*G1
-        u_bar = -1*q
-        p1_bar = h0 - torch.sum(G0*u_bar,dim = 2).unsqueeze(2)
-        p2_bar = h1 - torch.sum(G1*u_bar,dim = 2).unsqueeze(2)
-
-        G = torch.cat([torch.sum(y1_bar*y1_bar,dim = 2).unsqueeze(2).unsqueeze(0), torch.sum(y1_bar*y2_bar,dim = 2).unsqueeze(2).unsqueeze(0), torch.sum(y2_bar*y1_bar,dim = 2).unsqueeze(2).unsqueeze(0), torch.sum(y2_bar*y2_bar,dim = 2).unsqueeze(2).unsqueeze(0)], dim = 0)
-        #G = 1*[y1_bar*y1_bar', y1_bar*y2_bar'; y2_bar*y1_bar', y2_bar*y2_bar']
-        w_p1_bar = torch.clamp(p1_bar, max=0)
-        w_p2_bar = torch.clamp(p2_bar, max=0)
-
-        # G 0-(1,1), 1-(1,2), 2-(2,1), 3-(2,2)
-        lambda1 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, torch.zeros_like(p1_bar), torch.where(G[1]*w_p1_bar < G[0]*p2_bar, w_p1_bar/G[0], torch.clamp(G[3]*p1_bar - G[2]*p2_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
-        
-        lambda2 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, w_p2_bar/G[3], torch.where(G[1]*w_p1_bar < G[0]*p2_bar, torch.zeros_like(p1_bar), torch.clamp(G[0]*p2_bar - G[1]*p1_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
-
-        out = lambda1*y1_bar + lambda2*y2_bar + u_bar
-        out = out.squeeze(2)
-
-        rt = xp1.clone()      
-        rt[:,0:7] = x[:,0:7] + out[:,0:7]
-        rt = rt.unsqueeze(0)
-        return rt, torch.cat([b, b2]).min().item()
-    
-    @torch.no_grad()   
-    def GD(self, x, xp1):  # classifier guidance or potential based method
-
-        limits = torch.tensor(np.array([[-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-3.05432619,  3.05432619]])).to(x.device)
-        
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle:
-        limits[:,0] = (limits[:,0] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        limits[:,1] = (limits[:,1] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # limits = limits[None, None, None].cuda()
-        limits = (limits - 0.5) * 2
-        limits = limits.unsqueeze(0).expand(nBatch, 7, 2)
-
-        
-        x_cp = xp1.clone()
-        x_cp[1:,:] = x_cp[:-1,:].clone()
-
-        b = limits[:,:,1]-0.05 - (xp1[:,0:7] + 0.05*(xp1[:,0:7] - x_cp[:,0:7])/0.1)
-        # b = limits[:,:,1]-0.05 - xp1[:,0:7]
-        for k in range(nBatch):
-            for j in range(7):
-                if b[k, j] < 0:  # 0
-                    u = -0.02/(1+0.05/0.1)
-                    xp1[k,j] = xp1[k,j] + u
-
-        
-
-        # b2 = xp1[:,0:7] - (limits[:,:,0] + 0.05)
-        b2 = xp1[:,0:7] + 0.05*(xp1[:,0:7] - x_cp[:,0:7])/0.1 - (limits[:,:,0] + 0.05)
-        for k in range(nBatch):
-            for j in range(7):
-                if b[k, j] < 0:  # 0
-                    u = 0.02/(1+0.05/0.1)
-                    xp1[k,j] = xp1[k,j] + u
-        
-        xp1 = xp1.unsqueeze(0)
-
-        return xp1, torch.cat([b, b2], dim = 0).min().item()
-    
-    @torch.no_grad()  
-    def Shield(self, x0, xp10):  # Truncate method
-
-        limits = torch.tensor(np.array([[-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-2.96705973,  2.96705973],
-            [-2.0943951 ,  2.0943951 ],
-            [-3.05432619,  3.05432619]])).to(x0.device)
-
-        x = x0.clone()
-        xp1 = xp10.clone()
-
-        xp1 = xp1.squeeze(0)
-
-        nBatch = xp1.shape[0]
-
-        #normalize obstacle:
-        limits[:,0] = (limits[:,0] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        limits[:,1] = (limits[:,1] - self.mins.to(x.device)) / (self.maxs.to(x.device) - self.mins.to(x.device) + 1e-8)
-        # limits = limits[None, None, None].cuda()
-        limits = (limits - 0.5) * 2
-        limits = limits.unsqueeze(0).expand(nBatch, 7, 2)
-
-        ############################################
-        b = limits[:,:,1]-0.05 - xp1[:,0:7]
-        for k in range(nBatch):
-            for j in range(7):
-                if b[k, j] < 0:  # 0
-                    xp1[k,j] = limits[k,j,1]-0.05
-        
-        b = limits[:,:,1]-0.05 - xp1[:,0:7]
-
-        b2 = xp1[:,0:7] - (limits[:,:,0] + 0.05)
-        for k in range(nBatch):
-            for j in range(7):
-                if b2[k, j] < 0:  #
-                    xp1[k,j] = (limits[k,j,0] + 0.05)
-
-        b2 = xp1[:,0:7] - (limits[:,:,0] + 0.05)
-
-        xp1 = xp1.unsqueeze(0)
-        return xp1, torch.cat([b, b2], dim = 0).min().item()
 
     @torch.no_grad()
-    def p_sample_loop(self, x, mask, return_diffusion = False):
-        device = self.betas.device
-
-        shape = x.shape
-        b = shape[0]
-        img = torch.randn(shape, device=device)
-        img[mask.bool()] = x[mask.bool()].clone()
-        # img[:, 0, :] = mask
-        dif = []
-        for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
-            img, b_min = self.p_sample(img, mask, torch.full((b,), i, device=device, dtype=torch.long))
-            img[mask.bool()] = x[mask.bool()].clone()
-            dif.append(img)
-        # import pdb
-        # pdb.set_trace()
-        # print(img)
-            # img[mask.bool()] = x[mask.bool()].clone()
+    def p_sample_loop(self, x, mask, return_diffusion = False):        
+        shape = x.shape # (1, 128, 39)
+        batch_size = shape[0]
+        
+        alpha = 2.0
+        pred_n_timesteps = 600  # number of prediction steps
+        num_timesteps = 400  # number of correction steps
+        
+        pc_sample = True  # for ease to exp. it will always be true
+        # ================ Prediction Stage ================
+        if pc_sample:
+            x0_1st_phase = torch.randn(shape).to(self.device)
+            x0_1st_phase[mask.bool()] = x[mask.bool()].clone()
+            
+            pred_time_list = torch.linspace(0, 1, pred_n_timesteps+1).to(self.device)
+            for i in range(pred_n_timesteps):
+                t_now = pred_time_list[i]
+                dt = 1 / pred_n_timesteps
+                v_t = self.denoise_fn(x0_1st_phase, mask, torch.full((batch_size,), t_now, device=x0_1st_phase.device))
+                x0_1st_phase = x0_1st_phase + v_t * dt
+                x0_1st_phase[mask.bool()] = x[mask.bool()].clone()
+                # x0_1st_phase = apply_conditioning(x0_1st_phase, cond, self.action_dim)
+            x0_2nd_phase = x0_1st_phase
+        # ================ Correction Stage ================
+        else:
+            x0_2nd_phase = torch.randn(shape).to(self.device)
+            x0_2nd_phase[mask.bool()] = x[mask.bool()].clone()
+        
+        traj = [x0_2nd_phase]
+        
+        T = num_timesteps + 1
+        time = torch.linspace(0, 1, T).to(self.device)
+        z =  alpha*T / (T-1)
+        xp1 = x0_2nd_phase
+        for i in range(1, T):
+            t_now = time[i-1]
+        
+            B = xp1.shape[0]
+            t_batch = torch.full((B,), t_now, device=xp1.device)
+            # Step forward via some base policy (e.g., learned dynamics model)
+            u_raw = self.denoise_fn(xp1, mask, t_batch)
+            
+            dt = 1 / num_timesteps
+            if pc_sample:
+                one_minus_t = (num_timesteps - (i - 1)) / num_timesteps
+                dt = z*one_minus_t*dt
+            dx = u_raw * dt
+            
+            xp1 = xp1 + dx
+            
+            b_min = 0
+            #######################################################################################choose one
+            # xp1, b_min = self.invariance(x, xp1) # QP-solver
+            xp1, b_min = self.invariance_cf(x, xp1)  # closed-form
+            
+            xp1[mask.bool()] = x[mask.bool()].clone()
+            traj.append(xp1)
+        
         if return_diffusion:
-            dif = torch.cat(dif, dim = 0)
-            return img, dif, b_min
-        return img, b_min
+            traj = torch.cat(traj, dim = 0)
+            return xp1, traj, b_min
+        return xp1, b_min
 
     @torch.no_grad()
     def sample(self, x, mask):
@@ -860,12 +571,11 @@ class GaussianDiffusion(nn.Module):
         '''
             conditions : [ (time, state), ... ]
         '''
-        device = self.betas.device
+        device = self.device
         channels = 1 #self.channels
         shape = (batch_size, *self.image_size)
         x = torch.zeros(*shape, device=device)
 
-        # mask  = torch.zeros(*shape, device=device)[..., 0] # [1,128,39] -> [1, 128]
         mask = torch.zeros(*shape, device=device)[..., 0]
         # mask = conditions[0][1]
         # import pdb
@@ -874,7 +584,7 @@ class GaussianDiffusion(nn.Module):
 
         for t, _, val in conditions: # t is always 0, val is same init position
             # import pdb
-            # print(t)
+            # pdb.set_trace()
             # print(cond)
             # print(val)
             # x[mask.bool().cuda()] = val[mask.bool().cuda()].cuda()
@@ -883,97 +593,34 @@ class GaussianDiffusion(nn.Module):
 
         return self.p_sample_loop(x, mask, return_diffusion=True)
 
-    # #### conditional sampling
-    # @torch.no_grad()
-    # def p_conditional_sample_loop(self, shape, conditions):
-    #     '''
-    #         conditions : []
-    #     '''
-    #     device = self.betas.device
-
-    #     b = shape[0]
-    #     img = torch.randn(shape, device=device)
-    #     img = self.enforce_conditions(img, conditions)
-
-    #     for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
-    #         img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
-    #         img = self.enforce_conditions(img, conditions)
-    #     return img
-
-    # @torch.no_grad()
-    # def enforce_conditions(self, x, conditions):
-    #     '''
-    #         x : [ B x 1 x H x obs_dim ]
-    #     '''
-    #     for t, cond in conditions:
-    #         length = len(cond)
-    #         x[:,:,t:t+length] = cond
-    #     return x
-
-    # @torch.no_grad()
-    # def conditional_sample(self, batch_size = 16, conditions=[]):
-    #     image_size = self.image_size
-    #     channels = self.channels
-    #     return self.p_conditional_sample_loop((batch_size, channels, *image_size), conditions)
-    ####
-
-    # @torch.no_grad()
-    # def interpolate(self, x1, x2, t = None, lam = 0.5):
-    #     b, *_, device = *x1.shape, x1.device
-    #     t = default(t, self.num_timesteps - 1)
-
-    #     assert x1.shape == x2.shape
-
-    #     t_batched = torch.stack([torch.tensor(t, device=device)] * b)
-    #     xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batched), (x1, x2))
-
-    #     img = (1 - lam) * xt1 + lam * xt2
-    #     for i in tqdm(reversed(range(0, t)), desc='interpolation sample time step', total=t):
-    #         img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
-
-    #     return img
-
-    def q_sample(self, x_start, mask, t, noise=None):
-        noise = default(noise, lambda: conditional_noise(mask, x_start))
-
-        sample = (
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
-            extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
-        )
-
-        sample[mask.bool()] = x_start[mask.bool()]
-        # sample[:, :1, :] = mask[:, None, :]
-        return sample
-
-    def p_losses(self, x_start, mask, t, noise = None):
-        b, h, w = x_start.shape
-        noise = default(noise, lambda: conditional_noise(mask, x_start))
-
-        x_noisy = self.q_sample(x_start=x_start, mask=mask, t=t, noise=noise)
-        # x_noisy[mask.bool()] = x_start[mask.bool()].clone()
-        x_recon = self.denoise_fn(x_noisy, mask, t)
-
-        assert noise.shape == x_recon.shape
+    def p_losses(self, x_1, mask, t=None, noise=None):
+        b, h, w = x_1.shape
+        
+        mask[:,0] = 1
+        x_0 = torch.randn_like(x_1)
+        x_0[mask.bool()] = x_1[mask.bool()]
+        t, x_t, u_t = self.FM.sample_location_and_conditional_flow(x_0, x_1)
+        
+        x_t[mask.bool()] = x_1[mask.bool()]  # actually it is useless, because x_0[mask.bool()] = x_1[mask.bool()] ,so x_t[mask.bool()] = x_1[mask.bool()]
+        v_pred = self.denoise_fn(x_t, mask, t)
+        
+        v_pred[mask.bool()] = u_t[mask.bool()]
+        # pdb.set_trace()
         if self.loss_type == 'l1':
-            loss = (noise - x_recon).abs().mean()
-            # m = ~mask.bool()
-            # loss = (noise - x_recon).abs()
-            # loss = loss[m].mean()
+            loss = (u_t - v_pred).abs().mean()
         elif self.loss_type == 'l2':
-            loss = F.mse_loss(noise, x_recon)
+            loss = F.mse_loss(u_t, v_pred)
         else:
             raise NotImplementedError()
-
+        
+        
         return loss
 
     def forward(self, x, mask, *args, **kwargs):
-        # import pdb
-        # pdb.set_trace()
         # print(x.size())
         b, h, w, device, img_size, = *x.shape, x.device, self.image_size
         # assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
-        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
-        return self.p_losses(x, mask, t, *args, **kwargs)
+        return self.p_losses(x, mask, *args, **kwargs)
 
     #-------------------------------- tamp based sampling --------------------------------#
 
@@ -1019,7 +666,7 @@ class GaussianDiffusion(nn.Module):
 
     @torch.no_grad()
     def tamp_p_sample_loop(self, shape, mask, cube, target_ratio, return_path=False, verbose=True, **sample_kwargs):
-        device = self.betas.device
+        device = self.device
 
         batch_size = shape[0]
         x = torch.randn(shape, device=device)
@@ -1058,7 +705,7 @@ class GaussianDiffusion(nn.Module):
         '''
             conditions : [ (time, state), ... ]
         '''
-        device = self.betas.device
+        device = self.device
         channels = 1 #self.channels
         shape = (1, channels, *self.image_size)
         x = torch.zeros(*shape, device=device)
@@ -1068,8 +715,6 @@ class GaussianDiffusion(nn.Module):
             mask[:,:,t,:obs_dim] = 1
 
         return self.tamp_p_sample_loop(shape, mask, cube, target_ratio, **sample_kwargs)
-
-
 
 def conditional_noise(mask, x):
     noise = torch.randn_like(x)
@@ -1197,6 +842,8 @@ class Trainer(object):
                 data, mask = next(self.dl)
                 data = data.cuda()
                 mask = mask.cuda()
+                # mask[:,0] = 1.  # always condition on first state
+                # mask[:, -1] = 0.  # always not condition on last state
                 loss = self.model(data, mask)
                 print(f'{self.step}: {loss.item()}')
                 backwards(loss / self.gradient_accumulate_every, self.opt)
@@ -1212,13 +859,15 @@ class Trainer(object):
                 all_images_list = [self.ds[i][0] for i in inds]
                 ## [ -1, 1 ]
                 all_images = torch.cat(all_images_list, dim=0)
-               ## [ 0, 1 ]
+                ## [ 0, 1 ]
                 all_images = (all_images + 1) * 0.5
+                ## clip to valid range before unnormalize
+                all_images = all_images.clamp_(0.0, 1.0)
                 ## unnormalize
                 unnormed = self.ds.unnormalize(all_images)
                 savepath = str(self.results_folder / f'_sample-reference.png')
                 plot_samples(savepath, unnormed, self.renderer)
-
+                
             if self.step % self.save_and_sample_every == 0:
                 milestone = self.step // self.save_and_sample_every
                 self.save(milestone)
@@ -1232,11 +881,10 @@ class Trainer(object):
                 for i, conditions in enumerate(conditions_l):
                     ## [ -1, 1 ]
                     all_images, _, _ = self.ema_model.conditional_sample(batch_size=1, conditions=conditions)
-                    
-                    all_images = torch.clamp(all_images, min=-1.0, max=1.0)
                     ## [ 0, 1 ]
                     all_images = (all_images + 1) * 0.5
                     ## unnormalize
+                    all_images = all_images.clamp_(0.0, 1.0)
                     unnormed = self.ds.unnormalize(all_images)
                     savepath = str(self.results_folder / f'sample-{milestone}-{i}.png')
                     plot_samples(savepath, unnormed, self.renderer)

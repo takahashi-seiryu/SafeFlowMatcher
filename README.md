@@ -8,9 +8,18 @@ Implementation of our ICLR 2025 paper - SafeDiffuser: Safe Planning for Diffusio
 # Installation
 ```
 conda env create -f environment.yml
-conda activate safediffuser
+# must be error
+conda activate safe-kuka
+export MUJOCO_PY_MUJOCO_PATH=$HOME/.mujoco/mujoco200
+export LD_LIBRARY_PATH=$HOME/.mujoco/mujoco200/bin:${LD_LIBRARY_PATH}
+export MUJOCO_GL=osmesa
+mamba install -y -c conda-forge cmake swig glfw glew patchelf
+python -m pip install "Cython<0.29.32" "pip<23" "setuptools<60" "wheel<0.38"
 pip install -e .
 pip install qpth cvxpy cvxopt
+```
+```
+mamba activate safe-kuka
 ```
 
 # Switch between different experiments
@@ -28,7 +37,7 @@ Download pretrained diffusion models and value functions (from diffuser) with:
 ## Planning
 To plan with guided sampling, run:
 ```
-python scripts/plan_guided.py --dataset halfcheetah-medium-expert-v2 --logbase logs/pretrained
+python scripts/unconditional_kuka_planning_eval_cfm.py
 ```
 The --logbase points the experiment loader to the folder containing the pretrained/self-trained models.
 

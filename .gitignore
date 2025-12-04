@@ -1,0 +1,25 @@
+.vscode/
+__pycache__/
+**/__pycache__/
+*.egg-info/
+.DS_Store
+.hypothesis/
+*.npy
+*.mp4
+*.pyc
+
+# Logs
+logs/
+imgs/
+analy_*
+trajectory_segments.png
+
+# Model
+cfm.pkl
+diffuser.pkl
+
+gym/
+mujoco-py/
+=0.3.5
+
+remove_module_from_key.py

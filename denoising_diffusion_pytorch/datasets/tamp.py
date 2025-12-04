@@ -130,7 +130,9 @@ class KukaDataset(Dataset):
         for i, dataset in enumerate(datasets):
             qstate = np.load(dataset)
             qstate = qstate[::2]
-            print(qstate.max(), qstate.min())
+            # Debug print left from data inspection produced long streams like
+            # "2.58 ... -2.03 ..." when loading each episode; silence it.
+            # print(qstate.max(), qstate.min())
             # qstate[np.isnan(qstate)] = 0.0
             path_length = len(qstate)
 
@@ -144,7 +146,7 @@ class KukaDataset(Dataset):
         path_lengths = path_lengths[:i+1]
 
         ## make indices
-        print('Making indices')
+        # print('Making indices')
         indices = []
         for i, path_length in enumerate(path_lengths):
             for start in range(path_length - H + 1):
@@ -197,9 +199,10 @@ class KukaDataset(Dataset):
         # for t in cond:
         #     mask[:, t] = 1
         mask = torch.zeros_like(qstates[..., -1])
-        for t in cond:
-            mask[t] = 1
-
+        # for t in cond:
+        #     mask[t] = 1
+        mask[0] = 1
+        
         return qstates, mask
 
 
