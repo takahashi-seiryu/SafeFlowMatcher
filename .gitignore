@@ -7,7 +7,14 @@ __pycache__/
 *.npy
 *.mp4
 *.pyc
+*.pyx
 *.png
+*.whl
+*.tar
+*.txt
+*.h
+*.c
+.mujoco-py-2.0.2.13/
 
 # Logs
 logs/
