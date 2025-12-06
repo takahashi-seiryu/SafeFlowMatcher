@@ -139,7 +139,7 @@ base = {
 
         ## loading
         'diffusion_loadpath': 'f:diffusion/defaults_H{horizon}_T{n_diffusion_steps}',
-        'value_loadpath': 'f:values/defaults_H{horizon}_T{n_diffusion_steps}_d{discount}',
+        'value_loadpath': 'f:diffusion/values/defaults_H{horizon}_T{n_diffusion_steps}_d{discount}',
 
         'diffusion_epoch': 'latest',
         'value_epoch': 'latest',
@@ -149,6 +149,137 @@ base = {
     },
 }
 
+
+cfm = {
+    'diffusion': {
+        ## model
+        'model': 'models.TemporalUnet',
+        'diffusion': 'models.CFM',
+        'horizon': 600,  #32
+        'n_diffusion_steps': 20,
+        'action_weight': 10,
+        'loss_weights': None,
+        'loss_discount': 1,
+        'predict_epsilon': False,
+        'dim_mults': (1, 2, 4, 8),
+        'attention': False,
+        'renderer': 'utils.MuJoCoRenderer',
+
+        ## dataset
+        'loader': 'datasets.SequenceDataset',
+        'normalizer': 'LimitsNormalizer',
+        'preprocess_fns': [],
+        'clip_denoised': False,
+        'use_padding': True,
+        'max_path_length': 1000,
+
+        ## serialization
+        'logbase': logbase,
+        'prefix': 'cfm/defaults',
+        'exp_name': watch(args_to_watch),
+
+        ## training
+        'n_steps_per_epoch': 2500,
+        'loss_type': 'l2',
+        'n_train_steps': 2.5e5,
+        'batch_size': 128,
+        'learning_rate': 2e-4,
+        'gradient_accumulate_every': 1,
+        'ema_decay': 0.995,
+        'save_freq': 20000,
+        'sample_freq': 20000,
+        'n_saves': 5,
+        'save_parallel': False,
+        'n_reference': 8,
+        'bucket': None,
+        'device': 'cuda',
+        'seed': None,
+    },
+
+    'values': {
+        'model': 'models.ValueFunction',
+        'diffusion': 'models.ValueCFM',
+        'horizon': 600,
+        'n_diffusion_steps': 20,
+        'dim_mults': (1, 2, 4, 8),
+        'renderer': 'utils.MuJoCoRenderer',
+
+        ## value-specific kwargs
+        'discount': 0.99,
+        'termination_penalty': -100,
+        'normed': False,
+
+        ## dataset
+        'loader': 'datasets.ValueDataset',
+        'normalizer': 'LimitsNormalizer',
+        'preprocess_fns': [],
+        'use_padding': True,
+        'max_path_length': 1000,
+
+        ## serialization
+        'logbase': logbase,
+        'prefix': 'values/defaults',
+        'exp_name': watch(args_to_watch),
+
+        ## training
+        'n_steps_per_epoch': 2500,
+        'loss_type': 'value_l2',
+        'n_train_steps': 5e4,
+        'batch_size': 128,
+        'learning_rate': 2e-4,
+        'gradient_accumulate_every': 1,
+        'ema_decay': 0.995,
+        'save_freq': 1000,
+        'sample_freq': 0,
+        'n_saves': 5,
+        'save_parallel': False,
+        'n_reference': 8,
+        'bucket': None,
+        'device': 'cuda',
+        'seed': None,
+    },
+
+    'plan': {
+        'guide': 'sampling.ValueGuide',
+        'policy': 'sampling.GuidedPolicy',
+        'max_episode_length': 500,  #1000
+        'batch_size': 64,
+        'preprocess_fns': [],
+        'device': 'cuda',
+        'seed': None,
+
+        ## sample_kwargs
+        'n_guide_steps': 2,
+        'scale': 0.1,
+        't_stopgrad': 2,
+        'scale_grad_by_std': True,
+
+        ## serialization
+        'loadbase': None,
+        'logbase': logbase,
+        'prefix': 'plans/',
+        'exp_name': watch(args_to_watch),
+        'vis_freq': 100,
+        'max_render': 8,
+
+        ## diffusion model
+        'horizon': 600,    #32 ->600
+        'n_diffusion_steps': 20,
+
+        ## value function
+        'discount': 0.99,  # 0.997 ->0.99
+
+        ## loading
+        'diffusion_loadpath': 'f:cfm/defaults_H{horizon}_T{n_diffusion_steps}',
+        'value_loadpath': 'f:values/defaults_H{horizon}_T{n_diffusion_steps}_d{discount}',
+
+        'diffusion_epoch': 'latest',
+        'value_epoch': 'latest',
+
+        'verbose': True,
+        'suffix': '40',
+    },
+}
 
 #------------------------ overrides ------------------------#
 

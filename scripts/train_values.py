@@ -1,14 +1,18 @@
 import diffuser.utils as utils
 import pdb
-
+import torch
+import numpy as np
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
 class Parser(utils.Parser):
-    dataset: str = 'walker2d-medium-replay-v2'
+    # dataset: str = 'walker2d-medium-replay-v2'
+    dataset: str = 'hopper-medium-expert-v2'
     config: str = 'config.locomotion'
+    method: str = 'cfm'
+    seed: int = 42
 
 args = Parser().parse_args('values')
 
@@ -52,7 +56,7 @@ model_config = utils.Config(
     args.model,
     savepath=(args.savepath, 'model_config.pkl'),
     horizon=args.horizon,
-    transition_dim=observation_dim + action_dim,
+    transition_dim=observation_dim + action_dim,  # match actual data dimensionality
     cond_dim=observation_dim,
     dim_mults=args.dim_mults,
     device=args.device,
@@ -65,7 +69,7 @@ diffusion_config = utils.Config(
     observation_dim=observation_dim,
     action_dim=action_dim,
     n_timesteps=args.n_diffusion_steps,
-    loss_type=args.loss_type,
+    loss_type='value_l1',
     device=args.device,
 )
 
@@ -95,17 +99,32 @@ diffusion = diffusion_config(model)
 
 trainer = trainer_config(diffusion, dataset, renderer)
 
+print(f"[디버그] observation_dim: {observation_dim}")
+print(f"[디버그] action_dim: {action_dim}")
+print(f"[디버그] transition_dim: {observation_dim + action_dim}")
+print(f"[디버그] dataset horizon: {dataset.horizon}")
+print(f"[디버그] diffusion horizon: {diffusion.horizon}")
+print(f"[디버그] dataset[0] trajectories shape: {dataset[0].trajectories.shape}")
+
+
 #-----------------------------------------------------------------------------#
 #------------------------ test forward & backward pass -----------------------#
 #-----------------------------------------------------------------------------#
 
 print('Testing forward...', end=' ', flush=True)
-batch = utils.batchify(dataset[0])
+
+data = dataset[0]
+
+device = next(diffusion.parameters()).device  # Get the device of the model
+trajectories = torch.as_tensor(data.trajectories).unsqueeze(0).to(device)  # (1, 600, 14)
+conditions = {k: torch.as_tensor(v).unsqueeze(0).to(device) for k, v in data.conditions.items()}  # dict
+target = torch.as_tensor(data.values).unsqueeze(0).to(device)  # (1, 1)
+
+batch = (trajectories, conditions, target)
 
 loss, _ = diffusion.loss(*batch)
 loss.backward()
 print('✓')
-
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#

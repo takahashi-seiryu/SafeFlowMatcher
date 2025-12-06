@@ -150,6 +150,8 @@ class LimitsNormalizer(Normalizer):
     '''
         maps [ xmin, xmax ] to [ -1, 1 ]
     '''
+    def min_max(self):
+        return self.mins, self.maxs
 
     def normalize(self, x):
         ## [ 0, 1 ]

@@ -46,6 +46,22 @@ def atmost_2d(x):
         x = x.squeeze(0)
     return x
 
+def _safe_get_obs(env):
+    """Utility to obtain observations regardless of Gym/Gymnasium/MuJoCo versions."""
+    unwrapped = getattr(env, "unwrapped", env)
+    if hasattr(unwrapped, "_get_obs"):
+        return unwrapped._get_obs()
+
+    if hasattr(unwrapped, "sim"):
+        qpos = unwrapped.sim.data.qpos.ravel().copy()
+        qvel = unwrapped.sim.data.qvel.ravel().copy()
+        return np.concatenate([qpos[1:], qvel]).astype(np.float32)
+
+    try:
+        out = env.reset()
+        return out[0] if isinstance(out, tuple) else out
+    except Exception:
+        raise RuntimeError("Cannot obtain observation from env; please implement a custom getter.")
 #-----------------------------------------------------------------------------#
 #---------------------------------- renderers --------------------------------#
 #-----------------------------------------------------------------------------#
@@ -165,8 +181,8 @@ class MuJoCoRenderer:
         composite = np.ones_like(sample_images[0]) * 255
         import torch
         # import pdb; pdb.set_trace()
-        composite[81:83,:,:] = torch.tensor([255,0,0]).expand(2,256,3)  #172, 82:84, walker2d roof    ####1024 11/5/2024
-        # composite[67:69,:,:] = torch.tensor([255,0,0]).expand(2,1024,3)  #172, 82:84, hopper roof 
+        # composite[81:83,:,:] = torch.tensor([255,0,0]).expand(2,256,3)  #172, 82:84, walker2d roof    ####1024 11/5/2024
+        composite[67:69,:,:] = torch.tensor([255,0,0]).expand(2,1024,3)  #172, 82:84, hopper roof 
         # composite[120:122,:,:] = torch.tensor([255,0,0]).expand(2,1024,3)  #172, 82:84, halfcheetah roof
         i = 0
         # for img in sample_images[:index]:
@@ -389,7 +405,8 @@ def rollouts_from_state(env, state, actions_l):
 def rollout_from_state(env, state, actions):
     qpos_dim = env.sim.data.qpos.size
     env.set_state(state[:qpos_dim], state[qpos_dim:])
-    observations = [env._get_obs()]
+    # observations = [env._get_obs()] # it is for old gym version.
+    observations = [_safe_get_obs(env)]
     for act in actions:
         obs, rew, term, _ = env.step(act)
         observations.append(obs)

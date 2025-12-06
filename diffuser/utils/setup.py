@@ -68,7 +68,8 @@ class Parser(Tap):
         dataset = args.dataset.replace('-', '_')
         print(f'[ utils/setup ] Reading config: {args.config}:{dataset}')
         module = importlib.import_module(args.config)
-        params = getattr(module, 'base')[experiment]
+        params = getattr(module, 'cfm')[experiment]
+        # params = getattr(module, 'base')[experiment]
 
         if hasattr(module, dataset) and experiment in getattr(module, dataset):
             print(f'[ utils/setup ] Using overrides | config: {args.config} | dataset: {dataset}')

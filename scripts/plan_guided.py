@@ -87,7 +87,7 @@ comp_time = []
 safety = []
 scores = []
 import time
-for kk in range(10):
+for kk in range(100):
 
     observation = env.reset()
 
@@ -107,7 +107,7 @@ for kk in range(10):
         # utils.colab.run_diffusion(diffusion, dataset, observation, n_samples=1, device=args.device, horizon=320, guide=guide, sample_fn=sampling.n_step_guided_p_sample
         #     )
         start = time.time()
-        action, samples, diffusion, b_min = policy(conditions, batch_size=args.batch_size, verbose=args.verbose)
+        action, trajectories, diffusion_paths, b_min = policy(conditions, batch_size=args.batch_size, verbose=args.verbose)
         end = time.time()
         if t == 0:
             safety.append(b_min.cpu().numpy())
@@ -120,17 +120,17 @@ for kk in range(10):
         score = env.get_normalized_score(total_reward)
         print(
             f'step: {kk}/10 | t: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | score: {score:.4f} | '
-            f'values: {samples.values} | scale: {args.scale}',
+            f'values: {trajectories.values} | scale: {args.scale}',
             flush=True,
         )
 
         ## update rollout observations
         rollout.append(next_observation.copy())
-
-        ## render every `args.vis_freq` steps
-        # logger.log(t, samples, state, rollout, diffusion)
+        if t==0:
+            logger.log(t, trajectories, state, rollout, diffusion_paths)
 
         if terminal:
+            logger.log(t, trajectories, state, rollout, diffusion_paths)
             break
 
         observation = next_observation
