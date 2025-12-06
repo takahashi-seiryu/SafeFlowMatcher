@@ -18,6 +18,8 @@ from .helpers import (
     Losses,
 )
 
+from torch.autograd import Variable
+from qpth.qp import QPFunction, QPSolvers
 
 class CFM(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
@@ -195,7 +197,7 @@ class CFM(nn.Module):
                 x1_pred = x + (1-t)*vt
                 values, grad_v = self.value_guide.gradients(x1_pred, None, t)
             
-            # apply guidance
+            # apply guidancefrom qpth.qp import QPFunction, QPSolvers
             vt = self.guidance_matcher.apply_guidance(x, vt, grad_v, None, t, values.unsqueeze(-1))
         
         return vt
@@ -290,20 +292,12 @@ class CFM(nn.Module):
             
             b_min = torch.tensor(0.0, device=x_now.device) # only using When no CBF
             ##########################################walker2d
-            # x_next, b_min = self.GD(x_now, x_next)  # truncate method
-            # x_next, b_min = self.Shield(x_now, x_next)  # classifier guidance or potential-based method
             # x_next, b_min = self.invariance(x_now, x_next)  # RoS diffuser
             # x_next, b_min = self.invariance_cf(x_now, x_next)   #RoS diffuser, closed form
-            # x_next, b_min = self.invariance_cpx(x_now, x_next)  #RoS diffuser with complex safety specification
-            # x_next, b_min = self.invariance_cpx_cf(x_now, x_next) #RoS diffuser with complex safety specification, closed form
 
             ##########################################hopper
-            # x_next, b_min = self.GD_hopper(x_now, x_next) # truncate method
-            # x_next, b_min = self.Shield_hopper(x_now, x_next)  # #classifier guidance or potential-based method
             # x_next, b_min = self.invariance_hopper(x_now, x_next)  # RoS diffuser
             # x_next, b_min = self.invariance_hopper_cf(x_now, x_next)   #RoS diffuser, closed form
-            # x_next, b_min = self.invariance_hopper_cpx(x_now, x_next)  #RoS diffuser with complex specification
-            # x_next, b_min = self.invariance_hopper_cpx_cf(x_now, x_next)  #RoS diffuser with complex specification, closed form
             
             x_next = apply_conditioning(x_next, cond, self.action_dim)
 
@@ -356,6 +350,9 @@ class CFM(nn.Module):
 
         #CBF
         ############################################ceiling
+        epsilon = 1
+        rho = 0.99
+        
         b = height - x[:,6:7] # - 0.1*x[:,15:16]   # - 0.01  # for robustness
         Lfb = 0 
         Lgbu1 = -1*torch.ones_like(x[:,6:7])
@@ -363,9 +360,7 @@ class CFM(nn.Module):
   
         G = torch.cat([-Lgbu1], dim = 1)
         G = G.unsqueeze(1)
-        k = 1
-        h = Lfb + k*b
-        
+        h = Lfb + epsilon * torch.sign(b) * torch.abs(b)**rho
    
         q = -torch.cat([ref[:,6:7]], dim = 1).to(G.device)  #, ref[:,15:16]
         Q = Variable(torch.eye(1))
@@ -397,18 +392,21 @@ class CFM(nn.Module):
 
         #CBF
         ############################################ceiling
-        b = height - x[:,6:7] # - 0.1*x[:,15:16]    # - 0.01  # for robustness
+        epsilon = 1
+        rho = 0.99
+        
+        b0 = height - x[:,6:7] # - 0.1*x[:,15:16]    # - 0.01  # for robustness
         Lfb = 0 
         Lgbu1 = -1*torch.ones_like(x[:,6:7])
         #Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
   
         G0 = torch.cat([-Lgbu1], dim = 1)
-        k = 1
-        h0 = Lfb + k*b
+        h0 = Lfb + epsilon * torch.sign(b0) * torch.abs(b0)**rho
 
+        b1 = x[:,6:7] + 10
         Lgbu1 = 1*torch.ones_like(x[:,6:7])
         G1 = torch.cat([-Lgbu1], dim = 1)
-        h1 = Lfb + k*(x[:,6:7] + 10)
+        h1 = Lfb + epsilon * torch.sign(b1) * torch.abs(b1)**rho
 
         q = -torch.cat([ref[:,6:7]], dim = 1).to(G0.device)  #, ref[:,15:16]
 
@@ -434,108 +432,7 @@ class CFM(nn.Module):
         # print(out[0:4,0:1])
         rt = rt.unsqueeze(0)
 
-        return rt, torch.min(b)  # + 0.01  # for robustness
-    
-    
-    @torch.no_grad()   #only for sampling
-    def invariance_cpx(self, x, xp1):   # RoS diffuser with complex safety specification
-
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle: Gaussian, x:0-6 control, 6-23 state
-        height = 1.4
-        # height = (height - self.mean[0]) / self.std[0]
-        height =  2 * (height - mins[0]) / (maxs[0] - mins[0]) - 1
-
-        #CBF
-        ############################################ceiling
-        b = height - x[:,6:7] - 0.1*x[:,15:16]   # - 0.01  # for robustness
-        Lfb = 0 
-        Lgbu1 = -1*torch.ones_like(x[:,6:7])
-        Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
-  
-        G = torch.cat([-Lgbu1, -Lgbu2], dim = 1)
-        G = G.unsqueeze(1)
-        k = 1
-        h = Lfb + k*b
-        
-   
-        q = -torch.cat([ref[:,6:7], ref[:,15:16]], dim = 1).to(G.device)  #
-        Q = Variable(torch.eye(2))
-        Q = Q.unsqueeze(0).expand(nBatch, 2, 2).to(G.device)
-        
-        e = Variable(torch.Tensor())
-        out = QPFunction(verbose=-1, solver = QPSolvers.PDIPM_BATCHED)(Q, q, G, h, e, e)
-
-        rt = xp1.clone()      
-        rt[:,6:7] = x[:,6:7] + out[:,0:1]
-        rt[:,15:16] = x[:,15:16] + out[:,1:2]
-        rt = rt.unsqueeze(0)
-        return rt, torch.min(b)  # + 0.01  # for robustness
-    
-    @torch.no_grad()   #only for sampling
-    def invariance_cpx_cf(self, x, xp1): # RoS diffuser with complex safety specification, closed-form
-
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle: Gaussian, x:0-6 control, 6-23 state
-        height = 1.4
-        _max = 1.5205706357955933
-        _min = 0.8000273108482361
-        # height = (height - self.mean[0]) / self.std[0]
-        # pdb.set_trace()
-        height =  2 * (height - _max) / (_max - _min) - 1
-
-
-        #CBF
-        ############################################ceiling
-        b = height - x[:,6:7] - 0.1*x[:,15:16] # - 0.01  # for robustness
-        Lfb = 0 
-        Lgbu1 = -1*torch.ones_like(x[:,6:7])
-        Lgbu2 = -0.1*torch.ones_like(x[:,6:7])
-  
-        G0 = torch.cat([-Lgbu1, -Lgbu2], dim = 1)
-        k = 1
-        h0 = Lfb + k*b
-        
-        Lgbu1 = 1*torch.ones_like(x[:,6:7])
-        Lgbu2 = 0.1*torch.ones_like(x[:,6:7])
-        G1 = torch.cat([-Lgbu1, -Lgbu2], dim = 1)
-        h1 = Lfb + k*(x[:,6:7] + 0.1*x[:,15:16] + 10)
-   
-        q = -torch.cat([ref[:,6:7], ref[:,15:16]], dim = 1).to(G0.device)  #
-
-        y1_bar = 1*G0  # H or Q = identity matrix
-        y2_bar = 1*G1
-        u_bar = -1*q
-        p1_bar = h0 - torch.sum(G0*u_bar,dim = 1).unsqueeze(1)
-        p2_bar = h1 - torch.sum(G1*u_bar,dim = 1).unsqueeze(1)
-
-        G = torch.cat([torch.sum(y1_bar*y1_bar,dim = 1).unsqueeze(1).unsqueeze(0), torch.sum(y1_bar*y2_bar,dim = 1).unsqueeze(1).unsqueeze(0), torch.sum(y2_bar*y1_bar,dim = 1).unsqueeze(1).unsqueeze(0), torch.sum(y2_bar*y2_bar,dim = 1).unsqueeze(1).unsqueeze(0)], dim = 0)
-        #G = 1*[y1_bar*y1_bar', y1_bar*y2_bar'; y2_bar*y1_bar', y2_bar*y2_bar']
-        w_p1_bar = torch.clamp(p1_bar, max=0)
-        w_p2_bar = torch.clamp(p2_bar, max=0)
-
-        # G 0-(1,1), 1-(1,2), 2-(2,1), 3-(2,2)
-        lambda1 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, torch.zeros_like(p1_bar), torch.where(G[1]*w_p1_bar < G[0]*p2_bar, w_p1_bar/G[0], torch.clamp(G[3]*p1_bar - G[2]*p2_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
-        
-        lambda2 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, w_p2_bar/G[3], torch.where(G[1]*w_p1_bar < G[0]*p2_bar, torch.zeros_like(p1_bar), torch.clamp(G[0]*p2_bar - G[1]*p1_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
-
-        out = lambda1*y1_bar + lambda2*y2_bar + u_bar
-
-        rt = xp1.clone()      
-        rt[:,6:7] = x[:,6:7] + out[:,0:1]
-        rt[:,15:16] = x[:,15:16] + out[:,1:2]
-        rt = rt.unsqueeze(0)
-        return rt, torch.min(b) # + 0.01  # for robustness
+        return rt, torch.min(b0)  # + 0.01  # for robustness
 
 ###################################################################hopper  
     @torch.no_grad()   #only for sampling
@@ -633,102 +530,6 @@ class CFM(nn.Module):
         rt = rt.unsqueeze(0)
 
         return rt, torch.min(b)  # + 0.01  # for robustness
-    
-    @torch.no_grad()   #only for sampling
-    def invariance_hopper_cpx(self, x, xp1):  # RoS diffuser with complex safety specification (hopper)
-
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle: Gaussian, x:0-6 control, 6-23 state
-        height = 1.6
-        # height = (height - self.mean[0]) / self.std[0]
-        height =  2 * (height - mins[0]) / (maxs[0] - mins[0]) - 1
-
-        #CBF
-        ############################################ceiling
-        b = height - x[:,3:4] - 0.1*x[:,9:10]   # - 0.01  # for robustness
-        Lfb = 0 
-        Lgbu1 = -1*torch.ones_like(x[:,3:4])
-        Lgbu2 = -0.1*torch.ones_like(x[:,3:4])
-  
-        G = torch.cat([-Lgbu1, -Lgbu2], dim = 1)
-        G = G.unsqueeze(1)
-        k = 1
-        h = Lfb + k*b
-        
-   
-        q = -torch.cat([ref[:,3:4], ref[:,9:10]], dim = 1).to(G.device)  #
-        Q = Variable(torch.eye(2))
-        Q = Q.unsqueeze(0).expand(nBatch, 2, 2).to(G.device)
-        
-        e = Variable(torch.Tensor())
-        out = QPFunction(verbose=-1, solver = QPSolvers.PDIPM_BATCHED)(Q, q, G, h, e, e)
-
-        rt = xp1.clone()      
-        rt[:,3:4] = x[:,3:4] + out[:,0:1]
-        rt[:,9:10] = x[:,9:10] + out[:,1:2]
-        rt = rt.unsqueeze(0)
-        return rt, torch.min(b)  # + 0.01  # for robustness
-    
-    @torch.no_grad()   #only for sampling
-    def invariance_hopper_cpx_cf(self, x, xp1):   # RoS diffuser with complex safety specification, closed-form (hopper)
-
-        x = x.squeeze(0)
-        xp1 = xp1.squeeze(0)
-
-        nBatch = x.shape[0]
-        ref = xp1 - x
-
-        #normalize obstacle: Gaussian, x:0-6 control, 6-23 state
-        height = 1.6
-        # height = (height - self.mean[0]) / self.std[0]
-        height =  2 * (height - self.min[0]) / (self.max[0] - self.min[0]) - 1
-
-        #CBF
-        ############################################ceiling
-        b = height - x[:,3:4] - 0.1*x[:,9:10]   # - 0.01  # for robustness
-        Lfb = 0 
-        Lgbu1 = -1*torch.ones_like(x[:,3:4])
-        Lgbu2 = -0.1*torch.ones_like(x[:,3:4])
-  
-        G0 = torch.cat([-Lgbu1, -Lgbu2], dim = 1)
-        k = 1
-        h0 = Lfb + k*b
-
-        Lgbu1 = 1*torch.ones_like(x[:,3:4])
-        Lgbu2 = 0.1*torch.ones_like(x[:,3:4])
-        G1 = torch.cat([-Lgbu1, -Lgbu2], dim = 1)
-        h1 = Lfb + k*(x[:,3:4] + 0.1*x[:,9:10] + 10)    
-   
-        q = -torch.cat([ref[:,3:4], ref[:,9:10]], dim = 1).to(G0.device)  #
-
-        y1_bar = 1*G0  # H or Q = identity matrix
-        y2_bar = 1*G1
-        u_bar = -1*q
-        p1_bar = h0 - torch.sum(G0*u_bar,dim = 1).unsqueeze(1)
-        p2_bar = h1 - torch.sum(G1*u_bar,dim = 1).unsqueeze(1)
-
-        G = torch.cat([torch.sum(y1_bar*y1_bar,dim = 1).unsqueeze(1).unsqueeze(0), torch.sum(y1_bar*y2_bar,dim = 1).unsqueeze(1).unsqueeze(0), torch.sum(y2_bar*y1_bar,dim = 1).unsqueeze(1).unsqueeze(0), torch.sum(y2_bar*y2_bar,dim = 1).unsqueeze(1).unsqueeze(0)], dim = 0)
-        #G = 1*[y1_bar*y1_bar', y1_bar*y2_bar'; y2_bar*y1_bar', y2_bar*y2_bar']
-        w_p1_bar = torch.clamp(p1_bar, max=0)
-        w_p2_bar = torch.clamp(p2_bar, max=0)
-
-        # G 0-(1,1), 1-(1,2), 2-(2,1), 3-(2,2)
-        lambda1 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, torch.zeros_like(p1_bar), torch.where(G[1]*w_p1_bar < G[0]*p2_bar, w_p1_bar/G[0], torch.clamp(G[3]*p1_bar - G[2]*p2_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
-        
-        lambda2 = torch.where(G[2]*w_p2_bar < G[3]*p1_bar, w_p2_bar/G[3], torch.where(G[1]*w_p1_bar < G[0]*p2_bar, torch.zeros_like(p1_bar), torch.clamp(G[0]*p2_bar - G[1]*p1_bar, max=0)/(G[0]*G[3] - G[1]*G[2])))
-
-        out = lambda1*y1_bar + lambda2*y2_bar + u_bar
-
-        rt = xp1.clone()      
-        rt[:,3:4] = x[:,3:4] + out[:,0:1]
-        rt[:,9:10] = x[:,9:10] + out[:,1:2]
-        rt = rt.unsqueeze(0)
-        return rt, torch.min(b)   # + 0.01  # for robustness
     
     #------------------------------------------ training ------------------------------------------#
     
