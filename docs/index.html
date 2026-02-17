@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeFlowMatcher: Safe and Fast Planning using Flow Matching with Control Barrier Functions</title>
+  <link rel="stylesheet" href="static/css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+</head>
+<body>
+
+<!-- Title -->
+<section class="hero">
+  <div class="container">
+    <h1 class="title">SafeFlowMatcher</h1>
+    <h2 class="subtitle">Safe and Fast Planning using Flow Matching with Control Barrier Functions</h2>
+    <p class="venue">ICLR 2026</p>
+
+    <div class="authors">
+      <span class="author">
+        <a href="#">Jeongyong Yang</a><sup>*</sup>
+      </span>
+      <span class="author">
+        <a href="#">Seunghwan Jang</a><sup>*&dagger;</sup>
+      </span>
+      <span class="author">
+        <a href="#">SooJean Han</a>
+      </span>
+    </div>
+
+    <div class="affiliations">
+      <span>Korea Advanced Institute of Science and Technology (KAIST)</span>
+    </div>
+
+    <div class="author-note">
+      <sup>*</sup>Equal contribution &nbsp; <sup>&dagger;</sup>Corresponding author
+    </div>
+
+    <div class="buttons">
+      <a class="btn" href="#">
+        <i class="ai ai-arxiv"></i> Paper
+      </a>
+      <a class="btn" href="https://github.com/takahashi-seiryu/SafeFlowMatcher">
+        <i class="fab fa-github"></i> Code
+      </a>
+      <!-- Uncomment when available -->
+      <!-- <a class="btn" href="#">
+        <i class="fas fa-file-pdf"></i> PDF
+      </a> -->
+    </div>
+  </div>
+</section>
+
+<!-- Teaser -->
+<!-- Uncomment and replace when you have a teaser figure -->
+<!--
+<section class="section">
+  <div class="container">
+    <div class="teaser">
+      <img src="static/images/teaser.png" alt="SafeFlowMatcher overview">
+      <p class="caption">
+        <b>SafeFlowMatcher</b> couples flow matching with control barrier functions through a prediction-correction integrator,
+        achieving real-time safe planning with formal safety guarantees.
+      </p>
+    </div>
+  </div>
+</section>
+-->
+
+<!-- Abstract -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Abstract</h2>
+    <div class="abstract">
+      <p>
+        Generative planners based on flow matching (FM) produce high-quality paths in a single or a few ODE steps,
+        but their sampling dynamics offer no formal safety guarantees and can yield incomplete paths near constraints.
+        We present <b>SafeFlowMatcher</b>, a planning framework that couples FM with control barrier functions (CBFs)
+        to achieve <em>both</em> real-time efficiency and certified safety.
+      </p>
+      <p>
+        SafeFlowMatcher uses a two-phase <em>prediction&ndash;correction</em> (PC) integrator:
+        (i) a <b>prediction phase</b> integrates the learned FM once (or a few steps) to obtain a candidate path without intervention;
+        (ii) a <b>correction phase</b> refines this path with a vanishing time-scaled vector field and a CBF-based quadratic program
+        that minimally perturbs the vector field.
+        We prove a barrier certificate for the resulting flow system, establishing forward invariance of a robust safe set
+        and finite-time convergence to the safe set.
+      </p>
+      <p>
+        By enforcing safety only on the executed path&mdash;rather than all intermediate latent paths&mdash;SafeFlowMatcher
+        avoids distributional drift and mitigates local trap problems.
+        Moreover, SafeFlowMatcher attains faster, smoother, and safer paths than diffusion- and FM-based baselines
+        on maze navigation, locomotion, and robot manipulation tasks.
+        Extensive ablations corroborate the contributions of the PC integrator and the barrier certificate.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Method -->
+<section class="section alt-bg">
+  <div class="container">
+    <h2 class="section-title">Method</h2>
+    <div class="method">
+      <!-- Replace with your method figure -->
+      <div class="placeholder-figure">
+        <p>Method overview figure (coming soon)</p>
+      </div>
+      <p class="caption">
+        <b>Overview of SafeFlowMatcher.</b>
+        The prediction phase generates a candidate trajectory via flow matching,
+        and the correction phase refines it using a CBF-based quadratic program to ensure safety guarantees.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Results -->
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">Results</h2>
+
+    <h3 class="subsection-title">Maze Navigation</h3>
+    <div class="results-grid">
+      <!-- Replace placeholders with actual result images/videos -->
+      <div class="placeholder-figure small">
+        <p>Maze2D result (coming soon)</p>
+      </div>
+      <div class="placeholder-figure small">
+        <p>Maze2D result (coming soon)</p>
+      </div>
+    </div>
+
+    <h3 class="subsection-title">Locomotion</h3>
+    <div class="results-grid">
+      <div class="placeholder-figure small">
+        <p>Walker2D result (coming soon)</p>
+      </div>
+      <div class="placeholder-figure small">
+        <p>Hopper result (coming soon)</p>
+      </div>
+    </div>
+
+    <!-- Uncomment when you have a results table -->
+    <!--
+    <h3 class="subsection-title">Quantitative Results</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Maze2D Score</th>
+            <th>Safety Rate</th>
+            <th>Planning Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Diffuser</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+          <tr>
+            <td>SafeDiffuser</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+          <tr class="highlight-row">
+            <td><b>SafeFlowMatcher (Ours)</b></td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    -->
+  </div>
+</section>
+
+<!-- Video (optional) -->
+<!--
+<section class="section alt-bg">
+  <div class="container">
+    <h2 class="section-title">Video</h2>
+    <div class="video-wrapper">
+      <iframe src="https://www.youtube.com/embed/VIDEO_ID"
+              title="SafeFlowMatcher"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen>
+      </iframe>
+    </div>
+  </div>
+</section>
+-->
+
+<!-- BibTeX -->
+<section class="section alt-bg">
+  <div class="container">
+    <h2 class="section-title">BibTeX</h2>
+    <div class="bibtex-wrapper">
+      <button class="copy-btn" onclick="copyBibtex()">
+        <i class="fas fa-copy"></i> Copy
+      </button>
+      <pre><code id="bibtex">@inproceedings{yang2026safeflowmatcher,
+  title={SafeFlowMatcher: Safe and Fast Planning using Flow Matching with Control Barrier Functions},
+  author={Yang, Jeongyong and Jang, Seunghwan and Han, SooJean},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2026}
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <p>
+      This page template is inspired by
+      <a href="https://nerfies.github.io/" target="_blank">Nerfies</a>.
+    </p>
+  </div>
+</footer>
+
+<script>
+function copyBibtex() {
+  const text = document.getElementById('bibtex').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+    setTimeout(() => {
+      btn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+    }, 2000);
+  });
+}
+</script>
+
+</body>
+</html>

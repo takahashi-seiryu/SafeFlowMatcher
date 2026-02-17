@@ -1,22 +1,47 @@
-.vscode/
+# Python
 __pycache__/
 **/__pycache__/
+*.py[cod]
+*$py.class
 *.egg-info/
-.DS_Store
-.hypothesis/
+*.egg
+dist/
+build/
+.eggs/
 
-# Logs
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and outputs
 logs/
 imgs/
+wandb/
 analy_*
 trajectory_segments.png
 
-# Model
-cfm.pkl
-diffuser.pkl
+# Model checkpoints
+*.pkl
+*.pt
+*.pth
+*.ckpt
 
+# MuJoCo
+*.key
+mjkey.txt
 gym/
 mujoco-py/
-=0.3.5
 
-remove_module_from_key.py
+# Misc
+.hypothesis/
