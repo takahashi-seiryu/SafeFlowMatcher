@@ -137,9 +137,9 @@ class GaussianDiffusion(nn.Module):
         self.register_buffer('posterior_log_variance_clipped',
             torch.log(torch.clamp(posterior_variance, min=1e-20)))
         self.register_buffer('posterior_mean_coef1',
-            betas * np.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
+            betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         self.register_buffer('posterior_mean_coef2',
-            (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod))
+            (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
 
         ## get loss coefficients and initialize objective
         loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
@@ -151,7 +151,8 @@ class GaussianDiffusion(nn.Module):
             conditions,
             'observations',
         )
-        conditions = utils.to_torch(conditions, dtype=torch.float32, device='cuda:0')
+        device = next(self.parameters()).device
+        conditions = utils.to_torch(conditions, dtype=torch.float32, device=device)
         conditions = utils.apply_dict(
             einops.repeat,
             conditions,
@@ -668,8 +669,8 @@ class GaussianDiffusion(nn.Module):
         # normalize obstacle 1, x-1, y-0  x = 1/12*np.cos(theta) + 5.5/12, y = 1/9*np.sin(theta) + 5/9
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
         yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
-        off_x = 2*(5.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(5.6-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(4.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b = ((x[:,2:3] - off_y)/yr)**2 + ((x[:,3:4] - off_x)/xr)**2 - 1 - 0.01
@@ -694,8 +695,8 @@ class GaussianDiffusion(nn.Module):
         # normalize obstacle 2,  x = 1/12*np.sqrt(np.abs(np.cos(theta)))*np.sign(np.cos(theta)) + 5.3/12, y = 1/9*np.sqrt(np.abs(np.sin(theta)))*np.sign(np.sin(theta)) + 2/9
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
         yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
-        off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(5.1-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(1.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01
@@ -759,8 +760,8 @@ class GaussianDiffusion(nn.Module):
         xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
         yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
 
-        off_x = 2*(5.5-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(2-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(5.2-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(1.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.4  # 0.01
@@ -779,8 +780,8 @@ class GaussianDiffusion(nn.Module):
         h1 = Lfb + k*b
 
         ########################################### obs 2
-        off_x = 2*(5.5-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(4.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b2 = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01 #0.01
@@ -796,8 +797,8 @@ class GaussianDiffusion(nn.Module):
         h2 = Lfb + k*b2
 
         ########################################### obs 3
-        off_x = 2*(3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(2.5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(2.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(2.3-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b3 = ((x[:,2:3] - off_y)/yr/0.5)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01
@@ -811,8 +812,8 @@ class GaussianDiffusion(nn.Module):
         h3 = Lfb + k*b3
 
         ########################################### obs 4
-        off_x = 2*(8.5-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(3.5-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(8.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(3.3-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b4 = ((x[:,2:3] - off_y)/yr/1.8)**4 + ((x[:,3:4] - off_x)/xr/1.8)**4 - 1 - 0.01
@@ -826,8 +827,8 @@ class GaussianDiffusion(nn.Module):
         h4 = Lfb + k*b4
 
         ########################################### obs 5
-        off_x = 2*(7.6-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(7-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(7.4-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(6.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b5 = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.4 #0.01
@@ -841,8 +842,8 @@ class GaussianDiffusion(nn.Module):
         h5 = Lfb + k*b5
 
         ########################################### obs 6
-        off_x = 2*(10-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
-        off_y = 2*(6.3-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+        off_x = 2*(9.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(6.1-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
 
         # CBF
         b6 = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01
@@ -1071,6 +1072,28 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
+    def p_sample_loop_ddim(self, shape, cond, nfe=50, eta=1.0, verbose=True, record_traj=False):
+        device = self.betas.device
+        bsz = shape[0]
+        x = torch.randn(shape, device=device)
+        x = apply_conditioning(x, cond, self.action_dim)
+        if record_traj:
+            diffusion = [x]
+
+        t_sched = self._make_timestep_schedule(nfe, device)  # descending [t0 ... 0]
+        progress = utils.Progress(len(t_sched) - 1) if verbose else utils.Silent()
+        for i in range(len(t_sched) - 1):
+            t_vec = torch.full((bsz,), int(t_sched[i].item()), device=device, dtype=torch.long)
+            s_vec = torch.full((bsz,), int(t_sched[i + 1].item()), device=device, dtype=torch.long)
+            x = self._ddpm_jump(x, cond, t_vec, s_vec, eta=eta)  # eta=0 → DDIM
+            x = apply_conditioning(x, cond, self.action_dim)
+            if record_traj:
+                diffusion.append(x)
+            progress.update({'t': int(s_vec[0].item())})
+        progress.close()
+        return (x, torch.stack(diffusion, dim=1)) if record_traj else x
+    
+    @torch.no_grad()
     def p_sample(self, x, cond, t):
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t)
@@ -1094,14 +1117,14 @@ class GaussianDiffusion(nn.Module):
 
 
             ####################### truncate (shield) and GD (classifier-guidance/potential-based)
-            # x = self.Shield(x, xp1)
+            x = self.Shield(x, xp1)
             # x = self.GD(x, xp1, eps=0) #eps=0.1 for GD-eps/ eps=0 for GD
 
             ####################### SafeDiffusers 
             # x = self.invariance(x, xp1)    # RoS
-            #  x = self.invariance_cf(x, xp1)  # RoS closed form
+            # x = self.invariance_cf(x, xp1)  # RoS closed form
             # x = self.invariance_relax(x, xp1, t) # ReS
-            x = self.invariance_relax_cf(x, xp1, t)   #ReS closed form    
+            # x = self.invariance_relax_cf(x, xp1, t)   #ReS closed form    
             # x = self.invariance_time(x, xp1, t)   # TVS
             # x = self.invariance_time_cf(x, xp1, t)  # TVS closed form
             # x = self.invariance_relax_narrow(x, xp1, t)  # narrow passage case
@@ -1162,7 +1185,7 @@ class GaussianDiffusion(nn.Module):
         progress.close()
         # pdb.set_trace()
         if record_traj:
-            return x, torch.stack(diffusion, dim=1), [iter_time/self.n_timesteps]
+            return x, torch.stack(diffusion, dim=1), [iter_time]#[iter_time/self.n_timesteps]
         else:
             return x
 
@@ -1176,7 +1199,8 @@ class GaussianDiffusion(nn.Module):
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, cond, record_traj= record_traj, *args, **kwargs)   ## debug
+        # return self.p_sample_loop(shape, cond, record_traj= record_traj, *args, **kwargs)   ## debug
+        return self.p_sample_loop(shape, cond, record_traj= record_traj, *args, **kwargs)   ## for ddim
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -1301,7 +1325,7 @@ class GaussianDiffusion(nn.Module):
         return self.conditional_sample(cond=cond, *args, **kwargs)
     
     @torch.no_grad()
-    def _ddpm_jump(self, x_t, cond, t, s, eta=0): # for ddim extension
+    def _ddpm_jump(self, x_t, cond, t, s, eta=1): # for ddim extension
         """
         Jump from t -> s (s < t) using DDPM-ancestral noise.
         if eta=1.0, same variation with DDPM, for 0, deterministic

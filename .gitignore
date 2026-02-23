@@ -26,6 +26,7 @@ Thumbs.db
 
 # Logs and outputs
 logs/
+etc/
 imgs/
 wandb/
 analy_*
@@ -45,3 +46,11 @@ mujoco-py/
 
 # Misc
 .hypothesis/
+remove_module_from_key.py
+
+# Generated outputs
+_garbage/
+*.xlsx
+*.csv
+*.pdf
+*.png

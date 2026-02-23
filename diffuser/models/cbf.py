@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from qpth.qp import QPFunction, QPSolvers
+from torch.autograd import Variable
 import pdb
 
 class CBF:
@@ -18,8 +19,8 @@ class CBF:
         self.action_dim = 2
         
         # Parameters for CBF
-        self.alpha = 0.5
-        self.rho = 0.9
+        self.alpha = args.eps
+        self.rho = args.rho
 
         self.robust_term = args.robust_term
         self.relax_threshold = args.relax_threshold
@@ -33,6 +34,7 @@ class CBF:
     @torch.no_grad()
     def compute_single_constraint(self, x, obs, t=None):
         cx, cy = obs['center']
+        r = obs['radius']
         off_x = 2 * (cx - 0.5 - self.norm_mins[1]) / (self.norm_maxs[1] - self.norm_mins[1]) - 1
         off_y = 2 * (cy - 0.5 - self.norm_mins[0]) / (self.norm_maxs[0] - self.norm_mins[0]) - 1
         dx = (x[:,3:4] - off_x) / self.xr
@@ -49,7 +51,7 @@ class CBF:
         delta = self.robust_term
 
         # construct b(x)
-        b = dy**order + dx**order - (1 + delta)
+        b = dy**order + dx**order - (1 + delta)#**order # we need to eliminate order squere
 
         if self.cbf_method == 'robust':
             G = torch.cat([-L1, -L2], dim=1).unsqueeze(1)
@@ -69,7 +71,7 @@ class CBF:
             rx = sign * torch.ones_like(L1)
             G = torch.cat([-L1, -L2, rx], dim=1).unsqueeze(1)
 
-            b = dy**order + dx**order - (1 + delta)
+            b = dy**order + dx**order - (1 + delta) **order # we need to eliminate order squere
             finite_time_term = torch.sign(b) * torch.abs(b)**rho
             h = alpha * finite_time_term
 
@@ -221,6 +223,157 @@ class CBF:
         rt = xp1.clone()
         rt[:,2:4] = x[:,2:4] + out[:, :2]
         return rt.unsqueeze(0), safe_vals
+    
+    @torch.no_grad()
+    def apply_narrow(self, x, xp1, t):
+        """
+        Relaxed Safe Diffuser (ReS-diffuser) for maze2d-large-v1
+        (narrow passage case)
+        """
+        x = x.squeeze(0)
+        xp1 = xp1.squeeze(0)
+
+        nBatch = x.shape[0]
+        ref = xp1 - x
+        if t <= self.relax_threshold:   # debug  10
+            ratio = t / self.relax_threshold
+            sign = 200.0 * (1 - math.exp(3 * (ratio - 1)))
+            # sign = 1   # relax
+        else:
+            sign = 0   # non-relax
+
+        # normalize obstacle 1,  x = 1/12*np.sqrt(np.abs(np.cos(theta)))*np.sign(np.cos(theta)) + 5.3/12, y = 1/9*np.sqrt(np.abs(np.sin(theta)))*np.sign(np.sin(theta)) + 2/9
+        xr = 2*1/(self.norm_maxs[1] - self.norm_mins[1])
+        yr = 2*1/(self.norm_maxs[0] - self.norm_mins[0])
+
+        off_x = 2*(5.2-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(1.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+
+        # CBF
+        b = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.4  # 0.01
+        Lfb = 0
+        Lgbu1 = 4*((x[:,2:3] - off_y)/yr)**3/yr
+        Lgbu2 = 4*((x[:,3:4] - off_x)/xr)**3/xr
+
+        rx0 = torch.zeros_like(Lgbu1).to(b.device)
+        rx1 = sign*torch.ones_like(Lgbu1).to(b.device)
+
+        self.safe1 = torch.min(b[:,0] + 0.01)
+
+        G1 = torch.cat([-Lgbu1, -Lgbu2, rx1, rx0, rx0, rx0, rx0, rx0], dim = 1)
+        G1 = G1.unsqueeze(1)
+        k = 1
+        h1 = Lfb + k*b
+
+        ########################################### obs 2
+        off_x = 2*(5.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(4.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+
+        # CBF
+        b2 = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01 #0.01
+        Lfb = 0
+        Lgbu12 = 4*((x[:,2:3] - off_y)/yr)**3/yr
+        Lgbu22 = 4*((x[:,3:4] - off_x)/xr)**3/xr
+
+        self.safe2 = torch.min(b2[:,0] + 0.01)
+
+        G2 = torch.cat([-Lgbu12, -Lgbu22, rx0, rx1, rx0, rx0, rx0, rx0], dim = 1)
+        G2 = G2.unsqueeze(1)
+        k = 1
+        h2 = Lfb + k*b2
+
+        ########################################### obs 3
+        off_x = 2*(2.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(2.3-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+
+        # CBF
+        b3 = ((x[:,2:3] - off_y)/yr/0.5)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01
+        Lfb = 0
+        Lgbu13 = 4*((x[:,2:3] - off_y)/yr/0.5)**3/yr
+        Lgbu23 = 4*((x[:,3:4] - off_x)/xr)**3/xr
+
+        G3 = torch.cat([-Lgbu13, -Lgbu23, rx0, rx0, rx1, rx0, rx0, rx0], dim = 1)
+        G3 = G3.unsqueeze(1)
+        k = 1
+        h3 = Lfb + k*b3
+
+        ########################################### obs 4
+        off_x = 2*(8.3-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(3.3-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+
+        # CBF
+        b4 = ((x[:,2:3] - off_y)/yr/1.8)**4 + ((x[:,3:4] - off_x)/xr/1.8)**4 - 1 - 0.01
+        Lfb = 0
+        Lgbu14 = 4*((x[:,2:3] - off_y)/yr/1.8)**3/yr
+        Lgbu24 = 4*((x[:,3:4] - off_x)/xr/1.8)**3/xr
+
+        G4 = torch.cat([-Lgbu14, -Lgbu24, rx0, rx0, rx0, rx1, rx0, rx0], dim = 1)
+        G4 = G4.unsqueeze(1)
+        k = 1
+        h4 = Lfb + k*b4
+
+        ########################################### obs 5
+        off_x = 2*(7.4-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(6.8-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+
+        # CBF
+        b5 = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.4 #0.01
+        Lfb = 0
+        Lgbu15 = 4*((x[:,2:3] - off_y)/yr)**3/yr
+        Lgbu25 = 4*((x[:,3:4] - off_x)/xr)**3/xr
+
+        G5 = torch.cat([-Lgbu15, -Lgbu25, rx0, rx0, rx0, rx0, rx1, rx0], dim = 1)
+        G5 = G5.unsqueeze(1)
+        k = 1
+        h5 = Lfb + k*b5
+
+        ########################################### obs 6
+        off_x = 2*(9.8-0.5 - self.norm_mins[1])/(self.norm_maxs[1] - self.norm_mins[1]) - 1
+        off_y = 2*(6.1-0.5 - self.norm_mins[0])/(self.norm_maxs[0] - self.norm_mins[0]) - 1
+
+        # CBF
+        b6 = ((x[:,2:3] - off_y)/yr)**4 + ((x[:,3:4] - off_x)/xr)**4 - 1 - 0.01
+        Lfb = 0
+        Lgbu16 = 4*((x[:,2:3] - off_y)/yr)**3/yr
+        Lgbu26 = 4*((x[:,3:4] - off_x)/xr)**3/xr
+
+        G6 = torch.cat([-Lgbu16, -Lgbu26, rx0, rx0, rx0, rx0, rx0, rx1], dim = 1)
+        G6 = G6.unsqueeze(1)
+        k = 1
+        h6 = Lfb + k*b6
+
+        b0 = torch.cat([b, b2, b3, b4, b5, b6], dim = 1)
+        idx = torch.argmin(b0, dim = 1).cpu().numpy()
+        G0 = torch.cat([G1, G2, G3, G4, G5, G6], dim = 1)
+        h0 = torch.cat([h1, h2, h3, h4, h5, h6], dim = 1)
+        rows = len(G0[:,0,0])
+        G = []
+        h = []
+        for i in range(rows):
+            G.append(G0[i:i+1,idx[i]:idx[i]+1])
+            h.append(h0[i:i+1,idx[i]:idx[i]+1])
+        G = torch.cat(G, dim = 0)
+        h = torch.cat(h, dim = 0)
+
+        # G = torch.cat([G1, G2, G3, G4, G5, G6], dim = 1)
+        # h = torch.cat([h1, h2, h3, h4, h5, h6], dim = 1)
+
+        # G = torch.cat([G1, G2, G3, G5], dim = 1)
+        # h = torch.cat([h1, h2, h3, h5], dim = 1)
+        
+        q = -ref[:,2:4].to(G.device)
+        q0 = torch.zeros_like(q).to(G.device)
+        q = torch.cat([q, q0, q0, q0], dim = 1)
+        Q = Variable(torch.eye(8))
+        Q = Q.unsqueeze(0).expand(nBatch, 8, 8).to(G.device)
+        
+        e = Variable(torch.Tensor())
+        out = QPFunction(verbose=-1, solver = QPSolvers.PDIPM_BATCHED)(Q, q, G, h, e, e)
+
+        rt = xp1.clone()      
+        rt[:,2:4] = x[:,2:4] + out[:,0:2]
+        rt = rt.unsqueeze(0)
+        return rt, 0
         
     def calc_cbf(self, x):
         """

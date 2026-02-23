@@ -12,7 +12,7 @@ class Parser(utils.Parser):
     method: str = 'cfm'
 
 args = Parser().parse_args('diffusion')
-
+utils.set_device(args.device)
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- dataset ----------------------------------#

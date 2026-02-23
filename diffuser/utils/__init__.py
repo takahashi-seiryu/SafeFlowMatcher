@@ -7,3 +7,4 @@ from .rendering import *
 from .arrays import *
 from .colab import *
 from .local_trap import *
+from .energy_distance import *

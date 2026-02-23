@@ -305,14 +305,14 @@ class MazeRenderer:
         # Note:  choose any one of the below
         #---------------------------------------start--------------------------------------------------#
         #################################################### maze-large-v1
-        theta = np.linspace(0,2*np.pi, 100)
-        x = 1/12*np.cos(theta) + 5.8/12  #5.5
-        y = 1/9*np.sin(theta) + 5/9
-        plt.plot(x, y, c='red', zorder = 10)
+        # theta = np.linspace(0,2*np.pi, 100)
+        # x = 1/12*np.cos(theta) + 5.8/12  #5.5
+        # y = 1/9*np.sin(theta) + 5/9
+        # plt.plot(x, y, c='red', zorder = 10)
 
-        x = 1/12*np.sqrt(np.abs(np.cos(theta)))*np.sign(np.cos(theta)) + 5.3/12
-        y = 1/9*np.sqrt(np.abs(np.sin(theta)))*np.sign(np.sin(theta)) + 2/9
-        plt.plot(x, y, c='red', zorder = 10)
+        # x = 1/12*np.sqrt(np.abs(np.cos(theta)))*np.sign(np.cos(theta)) + 5.3/12
+        # y = 1/9*np.sqrt(np.abs(np.sin(theta)))*np.sign(np.sin(theta)) + 2/9
+        # plt.plot(x, y, c='red', zorder = 10)
 
         # ###################### maze-large-v1 more obstacles - narrow passage
         # x = 1/12*np.sqrt(np.abs(np.cos(theta)))*np.sign(np.cos(theta)) + 5.5/12
@@ -364,7 +364,8 @@ class MazeRenderer:
 
         plt.axis('off')
         plt.title(title)
-        img = plot2img(fig, remove_margins=self._remove_margins)
+        img = plot2img(fig, remove_margins=self._remove_margins)  # with white margin
+        # img = plot2img(fig, remove_margins=True)  # without white margin
         return img
 
     def composite(self, savepath, paths, ncol=5, **kwargs):
