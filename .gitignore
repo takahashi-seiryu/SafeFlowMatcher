@@ -54,3 +54,6 @@ _garbage/
 *.csv
 *.pdf
 *.png
+
+# But allow project page assets
+!docs/static/images/*.png
