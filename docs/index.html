@@ -7,6 +7,13 @@
   <link rel="stylesheet" href="static/css/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <!-- MathJax for equations -->
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
 
@@ -19,10 +26,10 @@
 
     <div class="authors">
       <span class="author">
-        <a href="#">Jeongyong Yang</a><sup>*</sup>
+        <a href="https://github.com/takahashi-seiryu">Jeongyong Yang</a><sup>*</sup>
       </span>
       <span class="author">
-        <a href="#">Seunghwan Jang</a><sup>*&dagger;</sup>
+        <a href="https://github.com/Jang-seunghwan">Seunghwan Jang</a><sup>*&dagger;</sup>
       </span>
       <span class="author">
         <a href="#">SooJean Han</a>
@@ -38,38 +45,40 @@
     </div>
 
     <div class="buttons">
-      <a class="btn" href="#">
+      <a class="btn" href="https://openreview.net/forum?id=refcXHU1Nh">
         <i class="ai ai-arxiv"></i> Paper
       </a>
       <a class="btn" href="https://github.com/takahashi-seiryu/SafeFlowMatcher">
         <i class="fab fa-github"></i> Code
       </a>
-      <!-- Uncomment when available -->
-      <!-- <a class="btn" href="#">
-        <i class="fas fa-file-pdf"></i> PDF
+      <a class="btn" href="https://iclr.cc/virtual/2026/poster/10007129">
+        <i class="fas fa-video"></i> ICLR Virtual
+      </a>
+      <!-- [PLACEHOLDER] Add poster PDF link when available -->
+      <!-- <a class="btn" href="static/SafeFlowMatcher_poster.pdf">
+        <i class="fas fa-image"></i> Poster
       </a> -->
     </div>
   </div>
 </section>
 
 <!-- Teaser -->
-<!-- Uncomment and replace when you have a teaser figure -->
-<!--
 <section class="section">
   <div class="container">
     <div class="teaser">
-      <img src="static/images/teaser.png" alt="SafeFlowMatcher overview">
+      <img src="static/images/problem_definition.png" alt="SafeFlowMatcher overview">
       <p class="caption">
-        <b>SafeFlowMatcher</b> couples flow matching with control barrier functions through a prediction-correction integrator,
-        achieving real-time safe planning with formal safety guarantees.
+        <b>Overview of SafeFlowMatcher versus existing certification-based methods.</b>
+        Directly constraining intermediate samples during generation (top) can cause paths to be distorted or trapped,
+        whereas SafeFlowMatcher (bottom) decouples generation and certification via a prediction&ndash;correction integrator,
+        producing a complete and certified-safe path.
       </p>
     </div>
   </div>
 </section>
--->
 
 <!-- Abstract -->
-<section class="section">
+<section class="section alt-bg">
   <div class="container">
     <h2 class="section-title">Abstract</h2>
     <div class="abstract">
@@ -99,96 +108,222 @@
 </section>
 
 <!-- Method -->
-<section class="section alt-bg">
+<section class="section">
   <div class="container">
     <h2 class="section-title">Method</h2>
     <div class="method">
-      <!-- Replace with your method figure -->
-      <div class="placeholder-figure">
-        <p>Method overview figure (coming soon)</p>
+      <!-- [PLACEHOLDER] Replace with a dedicated method diagram (e.g., draw.io / Figma)
+           Suggested content: A two-row diagram showing:
+           Row 1 (Prediction Phase): noise -> FM ODE integration -> candidate path tau_1^p
+           Row 2 (Correction Phase): tau_1^p -> vanishing time-scaled flow + CBF-QP -> safe path tau_1^c
+           Include: barrier function contours, safe set boundary, QP annotation
+      -->
+      <div class="placeholder-figure" id="method-placeholder" style="display:none;">
+        <p>[PLACEHOLDER: Method overview diagram]<br>
+        Need a clean diagram showing the prediction-correction pipeline.<br>
+        Suggested tool: draw.io or Figma. Export as static/images/method_overview.png</p>
       </div>
+      <img src="static/images/gen_process_SDvsSFM.png" alt="Generation process comparison" style="max-width:100%; border-radius:8px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
       <p class="caption">
-        <b>Overview of SafeFlowMatcher.</b>
-        The prediction phase generates a candidate trajectory via flow matching,
-        and the correction phase refines it using a CBF-based quadratic program to ensure safety guarantees.
+        <b>Comparison of path generation processes.</b>
+        (Top) RES-SafeDiffuser initializes samples all over the maze and converges to a path with local traps.
+        (Bottom) SafeFlowMatcher (ours) initializes from near the target path after the prediction phase,
+        and converges to a higher-quality path with no local traps.
+      </p>
+    </div>
+
+    <!-- Key Idea -->
+    <div class="abstract" style="margin-top: 32px;">
+      <h3 class="subsection-title">Key Idea: Prediction&ndash;Correction Integrator</h3>
+      <p>
+        <b>Phase 1 &mdash; Prediction:</b> Sample noise $\boldsymbol{\tau}_0^p \sim \mathcal{N}(0, I)$ and integrate the learned flow matching ODE in a single (or a few) Euler step(s) to obtain a candidate path $\boldsymbol{\tau}_1^p$, <em>without</em> any safety intervention. This preserves the native FM dynamics and avoids distributional drift.
+      </p>
+      <p>
+        <b>Phase 2 &mdash; Correction:</b> Starting from $\boldsymbol{\tau}_0^c = \boldsymbol{\tau}_1^p$, refine the path using <em>vanishing time-scaled flow dynamics</em> (VTFD) $\dot{\boldsymbol{\tau}}_t^c = \alpha(1-t) v_t(\boldsymbol{\tau}_t^c; \theta)$ combined with a CBF-based quadratic program that minimally perturbs the velocity field to guarantee forward invariance and finite-time convergence to the safe set.
       </p>
     </div>
   </div>
 </section>
 
 <!-- Results -->
-<section class="section">
+<section class="section alt-bg">
   <div class="container">
     <h2 class="section-title">Results</h2>
 
-    <h3 class="subsection-title">Maze Navigation</h3>
-    <div class="results-grid">
-      <!-- Replace placeholders with actual result images/videos -->
-      <div class="placeholder-figure small">
-        <p>Maze2D result (coming soon)</p>
-      </div>
-      <div class="placeholder-figure small">
-        <p>Maze2D result (coming soon)</p>
-      </div>
-    </div>
+    <h3 class="subsection-title">Maze2D Navigation</h3>
 
-    <h3 class="subsection-title">Locomotion</h3>
-    <div class="results-grid">
-      <div class="placeholder-figure small">
-        <p>Walker2D result (coming soon)</p>
-      </div>
-      <div class="placeholder-figure small">
-        <p>Hopper result (coming soon)</p>
-      </div>
-    </div>
-
-    <!-- Uncomment when you have a results table -->
-    <!--
-    <h3 class="subsection-title">Quantitative Results</h3>
+    <!-- Quantitative Results Table -->
     <div class="table-wrapper">
       <table>
         <thead>
           <tr>
             <th>Method</th>
-            <th>Maze2D Score</th>
-            <th>Safety Rate</th>
-            <th>Planning Time</th>
+            <th>BS1 (&ge;0)</th>
+            <th>BS2 (&ge;0)</th>
+            <th>Score &uarr;</th>
+            <th>Time (ms)</th>
+            <th>Trap Rate &darr;</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>Diffuser</td>
-            <td>-</td>
-            <td>-</td>
-            <td>-</td>
+            <td style="color:#dc2626;">-0.825</td>
+            <td style="color:#dc2626;">-0.784</td>
+            <td>1.572&pm;0.288</td>
+            <td><b>3.70</b></td>
+            <td>0%</td>
           </tr>
           <tr>
-            <td>SafeDiffuser</td>
-            <td>-</td>
-            <td>-</td>
-            <td>-</td>
+            <td>RES-SafeDiffuser</td>
+            <td>0.010</td>
+            <td>0.010</td>
+            <td>1.442&pm;0.451</td>
+            <td>4.72</td>
+            <td>72%</td>
+          </tr>
+          <tr>
+            <td>TVS-SafeDiffuser</td>
+            <td style="color:#dc2626;">-0.003</td>
+            <td style="color:#dc2626;">-0.003</td>
+            <td>1.506&pm;0.405</td>
+            <td>4.78</td>
+            <td>69%</td>
+          </tr>
+          <tr>
+            <td>TVS-SafeDDIM ($\eta$=1.0)</td>
+            <td style="color:#dc2626;">-0.026</td>
+            <td style="color:#dc2626;">-0.026</td>
+            <td>1.549&pm;0.304</td>
+            <td>4.74</td>
+            <td>65%</td>
+          </tr>
+          <tr>
+            <td>RES-SafeFM</td>
+            <td>0.010</td>
+            <td>0.010</td>
+            <td>1.401&pm;0.429</td>
+            <td>4.74</td>
+            <td>12%</td>
           </tr>
           <tr class="highlight-row">
             <td><b>SafeFlowMatcher (Ours)</b></td>
-            <td>-</td>
-            <td>-</td>
-            <td>-</td>
+            <td><b>0.010</b></td>
+            <td><b>0.010</b></td>
+            <td><b>1.632&pm;0.003</b></td>
+            <td>4.71</td>
+            <td><b>0%</b></td>
           </tr>
         </tbody>
       </table>
     </div>
-    -->
+    <p class="caption">
+      SafeFlowMatcher achieves the highest score with zero trap rate and guaranteed safety (BS &ge; 0), evaluated over 100 independent trials.
+    </p>
+
+    <h3 class="subsection-title">High-Dimensional Robotic Tasks</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Environment</th>
+            <th>Method</th>
+            <th>Score &uarr;</th>
+            <th>BS (&ge;0)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td rowspan="3">Walker2D</td>
+            <td>SafeDiffuser</td>
+            <td>0.321&pm;0.119</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>SafeFM</td>
+            <td>0.264&pm;0.127</td>
+            <td>Yes</td>
+          </tr>
+          <tr class="highlight-row">
+            <td><b>SafeFlowMatcher (Ours)</b></td>
+            <td><b>0.331&pm;0.021</b></td>
+            <td><b>Yes</b></td>
+          </tr>
+          <tr>
+            <td rowspan="3">Hopper</td>
+            <td>SafeDiffuser</td>
+            <td>0.464&pm;0.028</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>SafeFM</td>
+            <td>0.675&pm;0.312</td>
+            <td>Yes</td>
+          </tr>
+          <tr class="highlight-row">
+            <td><b>SafeFlowMatcher (Ours)</b></td>
+            <td><b>0.917&pm;0.026</b></td>
+            <td><b>Yes</b></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">
+      SafeFlowMatcher generalizes to high-dimensional locomotion tasks, achieving the highest score while maintaining safety guarantees.
+    </p>
+
+    <!-- Qualitative Results -->
+    <h3 class="subsection-title">Qualitative Results</h3>
+    <div class="results-grid">
+      <div style="text-align:center;">
+        <img src="static/images/local_trap.png" alt="Local trap example" style="max-width:100%; border-radius:8px;">
+        <p class="caption"><b>Local trap problem.</b> Waypoints get stuck near barrier boundaries.</p>
+      </div>
+      <div style="text-align:center;">
+        <img src="static/images/damping_traj.png" alt="Vanishing time-scale ablation" style="max-width:100%; border-radius:8px;">
+        <p class="caption"><b>Vanishing time-scale effect.</b> (a) With VTFD: stable. (b) Without: sharp drift near $t=1$.</p>
+      </div>
+    </div>
+
+    <div class="results-grid" style="margin-top:24px;">
+      <div style="text-align:center;">
+        <img src="static/images/p_NFE.png" alt="Prediction NFE ablation" style="max-width:100%; border-radius:8px;">
+        <p class="caption"><b>Predicted path quality vs $T^p$.</b> A single-step prediction already provides a good initialization.</p>
+      </div>
+      <div style="text-align:center;">
+        <img src="static/images/score_steps_main.png" alt="Score vs sampling steps" style="max-width:100%; border-radius:8px;">
+        <p class="caption"><b>Score vs sampling steps.</b> SafeFlowMatcher outperforms across all step budgets.</p>
+      </div>
+    </div>
+
+    <!-- [PLACEHOLDER] Locomotion / Robot Manipulation Visualizations -->
+    <h3 class="subsection-title">Robot Planning Visualizations</h3>
+    <div class="results-grid" style="grid-template-columns: repeat(3, 1fr);">
+      <div style="text-align:center;">
+        <img src="static/images/walker_plan.png" alt="Walker2D planning" style="max-width:100%; border-radius:8px;">
+        <p class="caption">Walker2D</p>
+      </div>
+      <div style="text-align:center;">
+        <img src="static/images/hopper_plan.png" alt="Hopper planning" style="max-width:100%; border-radius:8px;">
+        <p class="caption">Hopper</p>
+      </div>
+      <div style="text-align:center;">
+        <img src="static/images/kuka_plan.png" alt="Kuka manipulation" style="max-width:100%; border-radius:8px;">
+        <p class="caption">Kuka</p>
+      </div>
+    </div>
   </div>
 </section>
 
-<!-- Video (optional) -->
+<!-- Video (for ICLR virtual presentation) -->
+<!-- [PLACEHOLDER] Uncomment and add YouTube video ID after recording presentation -->
 <!--
-<section class="section alt-bg">
+<section class="section">
   <div class="container">
-    <h2 class="section-title">Video</h2>
+    <h2 class="section-title">Presentation Video</h2>
     <div class="video-wrapper">
-      <iframe src="https://www.youtube.com/embed/VIDEO_ID"
-              title="SafeFlowMatcher"
+      <iframe src="https://www.youtube.com/embed/YOUR_VIDEO_ID"
+              title="SafeFlowMatcher - ICLR 2026"
               frameborder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowfullscreen>
@@ -199,7 +334,7 @@
 -->
 
 <!-- BibTeX -->
-<section class="section alt-bg">
+<section class="section">
   <div class="container">
     <h2 class="section-title">BibTeX</h2>
     <div class="bibtex-wrapper">
@@ -212,6 +347,21 @@
   booktitle={International Conference on Learning Representations (ICLR)},
   year={2026}
 }</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- Acknowledgements -->
+<section class="section alt-bg">
+  <div class="container">
+    <h2 class="section-title">Acknowledgements</h2>
+    <div class="abstract">
+      <p>
+        The diffusion model implementation is based on
+        <a href="https://github.com/jannerm/diffuser">Diffuser</a> by Michael Janner.
+        The safe diffusion implementation is based on
+        <a href="https://github.com/Weixy21/SafeDiffuser">SafeDiffuser</a> by Wei Xiao.
+      </p>
     </div>
   </div>
 </section>
