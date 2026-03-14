@@ -26,13 +26,13 @@
 
     <div class="authors">
       <span class="author">
-        <a href="https://github.com/takahashi-seiryu">Jeongyong Yang</a><sup>*</sup>
+        <a href="https://takahashi-seiryu.github.io">Jeongyong Yang</a><sup>*</sup>
       </span>
       <span class="author">
-        <a href="https://github.com/Jang-seunghwan">Seunghwan Jang</a><sup>*&dagger;</sup>
+        <a href="https://jang-seunghwan.github.io">Seunghwan Jang</a><sup>*&dagger;</sup>
       </span>
       <span class="author">
-        <a href="#">SooJean Han</a>
+        <a href="https://soojean.github.io">SooJean Han</a>
       </span>
     </div>
 
@@ -62,17 +62,46 @@
   </div>
 </section>
 
-<!-- Teaser -->
+<!-- Teaser: Overview (left) + Trajectory Generation (right) -->
 <section class="section">
   <div class="container">
-    <div class="teaser">
-      <img src="static/images/problem_definition.png" alt="SafeFlowMatcher overview" style="max-width:70%;">
-      <p class="caption">
-        <b>Overview of SafeFlowMatcher versus existing certification-based methods.</b>
-        Directly constraining intermediate samples during generation (top) can cause paths to be distorted or trapped,
-        whereas SafeFlowMatcher (bottom) decouples generation and certification via a prediction&ndash;correction integrator,
-        producing a complete and certified-safe path.
-      </p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:32px; align-items:start; max-width:1100px; margin:0 auto;">
+      <!-- Left: Overview -->
+      <div>
+        <div class="teaser" style="text-align:center;">
+          <img src="static/images/problem_definition.png" alt="SafeFlowMatcher overview" style="max-width:100%; border-radius:8px;">
+          <p class="caption">
+            <b>Overview of SafeFlowMatcher versus existing certification-based methods.</b>
+            Directly constraining intermediate samples during generation (top) can cause paths to be distorted or trapped,
+            whereas SafeFlowMatcher (bottom) decouples generation and certification via a prediction&ndash;correction integrator,
+            producing a complete and certified-safe path.
+          </p>
+        </div>
+      </div>
+      <!-- Right: Trajectory Generation -->
+      <div>
+        <h3 class="subsection-title no-underline" style="margin-top:0;">Trajectory Generation</h3>
+        <div style="text-align:center;">
+          <video autoplay loop muted playsinline style="width:90%; border-radius:8px;">
+            <source src="static/videos/loco.mp4" type="video/mp4">
+          </video>
+          <p class="caption">Locomotion (Hopper)</p>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+          <div style="text-align:center;">
+            <video autoplay loop muted playsinline style="max-width:100%; border-radius:8px;">
+              <source src="static/videos/maze.mp4" type="video/mp4">
+            </video>
+            <p class="caption">Maze2D Navigation</p>
+          </div>
+          <div style="text-align:center;">
+            <video autoplay loop muted playsinline style="max-width:100%; border-radius:8px;">
+              <source src="static/videos/kuka.mp4" type="video/mp4">
+            </video>
+            <p class="caption">Kuka Manipulation</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -150,28 +179,6 @@
   <div class="container">
     <h2 class="section-title">Results</h2>
 
-    <h3 class="subsection-title no-underline">Trajectory Generation</h3>
-    <div style="text-align:center; max-width:700px; margin:0 auto;">
-      <video autoplay loop muted playsinline style="width:80%; border-radius:8px;">
-        <source src="static/videos/loco.mp4" type="video/mp4">
-      </video>
-      <p class="caption">Locomotion (Walker2D / Hopper)</p>
-    </div>
-    <div class="results-grid" style="grid-template-columns: repeat(2, 1fr); max-width:550px; margin:20px auto 0;">
-      <div style="text-align:center;">
-        <video autoplay loop muted playsinline style="max-width:100%; border-radius:8px;">
-          <source src="static/videos/maze.mp4" type="video/mp4">
-        </video>
-        <p class="caption">Maze2D Navigation</p>
-      </div>
-      <div style="text-align:center;">
-        <video autoplay loop muted playsinline style="max-width:100%; border-radius:8px;">
-          <source src="static/videos/kuka.mp4" type="video/mp4">
-        </video>
-        <p class="caption">Kuka Manipulation</p>
-      </div>
-    </div>
-
     <h3 class="subsection-title no-underline">Maze2D Navigation</h3>
 
     <!-- Quantitative Results Table -->
@@ -248,6 +255,7 @@
       <table>
         <thead>
           <tr>
+            <th>Category</th>
             <th>Environment</th>
             <th>Method</th>
             <th>Score &uarr;</th>
@@ -256,9 +264,10 @@
         </thead>
         <tbody>
           <tr>
+            <td rowspan="6"><b>Locomotion</b></td>
             <td rowspan="3">Walker2D</td>
             <td>SafeDiffuser</td>
-            <td>0.321&pm;0.119</td>
+            <td>0.283&pm;0.135</td>
             <td>Yes</td>
           </tr>
           <tr>
@@ -274,7 +283,7 @@
           <tr>
             <td rowspan="3">Hopper</td>
             <td>SafeDiffuser</td>
-            <td>0.464&pm;0.028</td>
+            <td>0.435&pm;0.068</td>
             <td>Yes</td>
           </tr>
           <tr>
@@ -287,11 +296,28 @@
             <td><b>0.917&pm;0.026</b></td>
             <td><b>Yes</b></td>
           </tr>
+          <tr>
+            <td rowspan="3"><b>Robot Manipulation</b></td>
+            <td rowspan="3">Block Stacking</td>
+            <td>SafeDiffuser</td>
+            <td>0.72&pm;0.055</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>SafeFM</td>
+            <td>0.73&pm;0.056</td>
+            <td>Yes</td>
+          </tr>
+          <tr class="highlight-row">
+            <td><b>SafeFlowMatcher (Ours)</b></td>
+            <td><b>0.76&pm;0.053</b></td>
+            <td><b>Yes</b></td>
+          </tr>
         </tbody>
       </table>
     </div>
     <p class="caption">
-      SafeFlowMatcher generalizes to high-dimensional locomotion tasks, achieving the highest score while maintaining safety guarantees.
+      <b>Performance on high-dimensional robotic tasks.</b> SafeFlowMatcher maintains its advantages in both locomotion and robot manipulation settings.
     </p>
   </div>
 </section>
